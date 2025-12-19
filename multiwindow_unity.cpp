@@ -81,6 +81,13 @@ public:
         int finalHeight = this->targetHeight;
         float finalOpacity = this->targetOpacity;
 
+        if (finalWidth > 5000) {
+            finalWidth = 5000;
+        }
+        if (finalHeight > 5000) {
+            finalHeight = 5000;
+        }
+
         if (finalX < 0 - finalWidth) {
             finalOpacity = 0;
         }
@@ -165,8 +172,8 @@ extern "C" WINAPI Size get_window_size(HANDLE window) {
 
     CustomWindow* customWindow = (CustomWindow*)window;
     Size size;
-    size.width = customWindow->targetWidth;
-    size.height = customWindow->targetHeight;
+    size.width = customWindow->targetWidth / 2;
+    size.height = customWindow->targetHeight / 2;
     return size;
 }
 
@@ -206,12 +213,15 @@ extern "C" WINAPI void set_window_position(HANDLE window, int x, int y) {
 }
 
 extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, int h) {
-    std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
     if (window == MAIN_WINDOW) {
+        std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
         return "";
     }
-
+    
     CustomWindow* customWindow = (CustomWindow*)window;
+    if (customWindow->targetX != x || customWindow->targetY != y || customWindow->targetWidth != w || customWindow->targetHeight != h) {
+        std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
+    }
     customWindow->setTargetMove(x, y);
     customWindow->setTargetSize(w, h);
     customWindow->updateThings();

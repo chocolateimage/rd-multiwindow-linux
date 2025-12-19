@@ -200,16 +200,24 @@ extern "C" WINAPI Size get_window_size(HANDLE window) {
 
     CustomWindow* customWindow = (CustomWindow*)window;
     Size size;
-    size.width = 700;
-    size.height = 400;
+    size.width = customWindow->targetWidth;
+    size.height = customWindow->targetHeight;
     return size;
 }
 
 extern "C" WINAPI Size get_view_size(HANDLE window) {
     // std::cerr << "get_view_size(" << std::hex << window << std::dec << ")" << std::endl;
+    if (window == MAIN_WINDOW) {
+        Size size;
+        size.width = 700;
+        size.height = 400;
+        return size;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
     Size size;
-    size.width = 1280;
-    size.height = 720;
+    size.width = customWindow->targetWidth;
+    size.height = customWindow->targetHeight;
     return size;
 }
 

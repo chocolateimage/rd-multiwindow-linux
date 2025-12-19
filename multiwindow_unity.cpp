@@ -42,6 +42,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved
     return TRUE;
 }
 
+
 class CustomWindow : public QWidget {
 public:
     int targetX;
@@ -49,6 +50,7 @@ public:
     int targetWidth;
     int targetHeight;
     float targetOpacity;
+    QLabel* testLabel;
 
     CustomWindow() {
         this->targetX = 0;
@@ -56,6 +58,10 @@ public:
         this->targetWidth = 1;
         this->targetHeight = 1;
         this->targetOpacity = 1;
+
+        testLabel = new QLabel("Example Text", this);
+        testLabel->setStyleSheet("QLabel { color: white; font-size: 24px; }");
+        testLabel->show();
     }
 
     void setTargetMove(int x, int y) {
@@ -73,8 +79,20 @@ public:
         int finalY = this->targetY;
         int finalWidth = this->targetWidth;
         int finalHeight = this->targetHeight;
-        int finalOpacity = this->targetOpacity;
+        float finalOpacity = this->targetOpacity;
 
+        if (finalX < 0 - finalWidth) {
+            finalOpacity = 0;
+        }
+        if (finalX > 50000) { // TODO: Use screen size
+            finalOpacity = 0;
+        }
+        if (finalY < 0 - finalHeight) {
+            finalOpacity = 0;
+        }
+        if (finalY > 50000) { // TODO: Use screen size
+            finalOpacity = 0;
+        }
         if (finalWidth < 2) {
             finalOpacity = 0;
             finalWidth = 2;
@@ -84,10 +102,19 @@ public:
             finalHeight = 2;
         }
 
+        testLabel->setText(QString("Position: %1, %2\nSize: %3 x %4").arg(QString::number(finalX), QString::number(finalY), QString::number(finalWidth), QString::number(finalHeight)));
+        testLabel->setGeometry(0, 0, finalWidth, finalHeight);
+
         this->setGeometry(finalX, finalY, finalWidth, finalHeight);
         this->setWindowOpacity(finalOpacity);
     }
+
+    ~CustomWindow() {
+        delete this->testLabel;
+    }
 };
+
+std::vector<CustomWindow*> allCustomWindows;
 
 std::string boolToStr(bool value) {
     return value ? "true" : "false";
@@ -118,7 +145,7 @@ extern "C" WINAPI const char* set_window_title(HANDLE window, char* title) {
 }
 
 extern "C" WINAPI HANDLE __win32_get_hwnd(HANDLE window) {
-    std::cerr << "__win32_get_hwnd(" << std::hex << window << std::dec << ")" << std::endl;
+    // std::cerr << "__win32_get_hwnd(" << std::hex << window << std::dec << ")" << std::endl;
     return (void*)0xDEADBEEF;
 }
 
@@ -179,7 +206,7 @@ extern "C" WINAPI void set_window_position(HANDLE window, int x, int y) {
 }
 
 extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, int h) {
-    // std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
+    std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
     if (window == MAIN_WINDOW) {
         return "";
     }
@@ -236,6 +263,7 @@ extern "C" WINAPI FFIResult new_window(
     customWindow->setTargetMove(x, y);
     customWindow->setTargetSize(w, h);
     customWindow->updateThings();
+    allCustomWindows.push_back(customWindow);
     customWindow->show();
 
     FFIResult result;
@@ -326,6 +354,7 @@ extern "C" WINAPI void destroy_window(HWND window) {
     CustomWindow* customWindow = (CustomWindow*)window;
     customWindow->setWindowOpacity(0);
     customWindow->close();
+    allCustomWindows.erase(std::find(allCustomWindows.begin(), allCustomWindows.end(), customWindow));
     delete customWindow;
 }
 
@@ -364,6 +393,9 @@ extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
 
 void __stdcall render(int eventID) {
     // std::cerr << "render(" << eventID << ")" << std::endl;
+    for (auto customWindow : allCustomWindows) {
+        customWindow->repaint();
+    }
 }
 
 extern "C" WINAPI void* get_render_event_func() {

@@ -25,3 +25,7 @@
 25 stdcall hide_window (ptr) hide_window
 26 stdcall arrange_windows (ptr) arrange_windows
 27 stdcall get_render_event_func (ptr) get_render_event_func
+28 stdcall get_window_fullscreen (ptr) get_window_fullscreen
+29 stdcall set_window_fullscreen (ptr long) set_window_fullscreen
+30 stdcall set_window_frame_visible (ptr long) set_window_frame_visible
+31 stdcall focus_window (ptr) focus_window

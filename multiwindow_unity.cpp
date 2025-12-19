@@ -20,7 +20,7 @@ bool createdApplication = false;
 void createApplication() {
     if (createdApplication) return;
     createdApplication = true;
-        qputenv("QT_QPA_PLATFORM", "xcb");
+    qputenv("QT_QPA_PLATFORM", "xcb");
 
     std::cerr << "Create new application" << std::endl;
     int argc = 0;
@@ -42,25 +42,51 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved
     return TRUE;
 }
 
-// extern "C" void WINAPI get_main_window() {
-//     fprintf(stderr, "[multiwindow_unity] get_main_window();\n");
-//     qputenv("QT_QPA_PLATFORM", "xcb");
-//     std::thread([] {
-//         int argc = 0;
-//         QApplication app(argc, {});
-//         QWidget window;
-//         window.resize(320, 240);
-//         window.show();
-//         window.setWindowTitle("Qt Test");
-//         app.exec();
-//     }).detach();
-//     // usleep(1000 * 1000);
-//     // fprintf(stderr, "[multiwindow_unity] WAITED!\n");
-//     // system("kdialog --msgbox get_main_window");
-// }
-
 class CustomWindow : public QWidget {
-    
+public:
+    int targetX;
+    int targetY;
+    int targetWidth;
+    int targetHeight;
+    float targetOpacity;
+
+    CustomWindow() {
+        this->targetX = 0;
+        this->targetY = 0;
+        this->targetWidth = 1;
+        this->targetHeight = 1;
+        this->targetOpacity = 1;
+    }
+
+    void setTargetMove(int x, int y) {
+        this->targetX = x;
+        this->targetY = y;
+    }
+
+    void setTargetSize(int w, int h) {
+        this->targetWidth = w;
+        this->targetHeight = h;
+    }
+
+    void updateThings() {
+        int finalX = this->targetX;
+        int finalY = this->targetY;
+        int finalWidth = this->targetWidth;
+        int finalHeight = this->targetHeight;
+        int finalOpacity = this->targetOpacity;
+
+        if (finalWidth < 2) {
+            finalOpacity = 0;
+            finalWidth = 2;
+        }
+        if (finalHeight < 2) {
+            finalOpacity = 0;
+            finalHeight = 2;
+        }
+
+        this->setGeometry(finalX, finalY, finalWidth, finalHeight);
+        this->setWindowOpacity(finalOpacity);
+    }
 };
 
 std::string boolToStr(bool value) {
@@ -69,7 +95,6 @@ std::string boolToStr(bool value) {
 
 extern "C" WINAPI HANDLE get_main_window() {
     std::cerr << "get_main_window()" << std::endl;
-    //MessageBoxA(NULL, "Good measure", "Test", 0);
     return MAIN_WINDOW;
 }
 
@@ -82,6 +107,13 @@ extern "C" WINAPI const char* refresh_main_window_ptr() {
 
 extern "C" WINAPI const char* set_window_title(HANDLE window, char* title) {
     std::cerr << "set_window_title(" << std::hex << window << std::dec << ", " << title << ")" << std::endl;
+    if (window == MAIN_WINDOW) {
+        return unused;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
+    customWindow->setWindowTitle(title);
+
     return unused;
 }
 
@@ -97,9 +129,17 @@ struct Size {
 
 extern "C" WINAPI Size get_window_size(HANDLE window) {
     // std::cerr << "get_window_size(" << std::hex << window << std::dec << ")" << std::endl;
+    if (window == MAIN_WINDOW) {
+        Size size;
+        size.width = 150;
+        size.height = 150;
+        return size;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
     Size size;
-    size.width = 1280;
-    size.height = 720;
+    size.width = customWindow->targetWidth;
+    size.height = customWindow->targetHeight;
     return size;
 }
 
@@ -113,14 +153,29 @@ extern "C" WINAPI Size get_view_size(HANDLE window) {
 
 extern "C" WINAPI Size get_window_position(HANDLE window) {
     std::cerr << "get_window_position(" << std::hex << window << std::dec << ")" << std::endl;
+    if (window == MAIN_WINDOW) {
+        Size size;
+        size.width = 150;
+        size.height = 150;
+        return size;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
     Size size;
-    size.width = 150;
-    size.height = 150;
+    size.width = customWindow->targetX;
+    size.height = customWindow->targetY;
     return size;
 }
 
 extern "C" WINAPI void set_window_position(HANDLE window, int x, int y) {
     std::cerr << "set_window_position(" << std::hex << window << std::dec << ", " << x << ", " << y << ")" << std::endl;
+    if (window == MAIN_WINDOW) {
+        return;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
+    customWindow->setTargetMove(x, y);
+    customWindow->updateThings();
 }
 
 extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, int h) {
@@ -130,18 +185,30 @@ extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, in
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->move(x, y);
-    customWindow->resize(w, h);
+    customWindow->setTargetMove(x, y);
+    customWindow->setTargetSize(w, h);
+    customWindow->updateThings();
     return "";
 }
 
 extern "C" WINAPI const char* move_window_to_top(HANDLE window) {
     std::cerr << "move_window_to_top(" << std::hex << window << std::dec << ")" << std::endl;
+    if (window == MAIN_WINDOW) {
+        return "";
+    }
+
     return "";
 }
 
 extern "C" WINAPI void set_window_size(HANDLE window, int w, int h) {
     std::cerr << "set_window_size(" << std::hex << window << std::dec << ", " << w << ", " << h << ")" << std::endl;
+    if (window == MAIN_WINDOW) {
+        return;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
+    customWindow->setTargetSize(w, h);
+    customWindow->updateThings();
 }
 
 struct FFIResult {
@@ -165,8 +232,10 @@ extern "C" WINAPI FFIResult new_window(
         << std::endl;
     
     CustomWindow* customWindow = new CustomWindow();
-    customWindow->move(x, y);
-    customWindow->resize(w, h);
+    customWindow->setWindowTitle(title);
+    customWindow->setTargetMove(x, y);
+    customWindow->setTargetSize(w, h);
+    customWindow->updateThings();
     customWindow->show();
 
     FFIResult result;
@@ -176,9 +245,19 @@ extern "C" WINAPI FFIResult new_window(
     return result;
 }
 
+extern "C" WINAPI const char* focus_window(HWND window) {
+    std::cerr << "focus_window(" << std::hex << window << std::dec << ")" << std::endl;
+    return "";
+}
+
 extern "C" WINAPI bool is_window_focused(HWND window) {
     // std::cerr << "is_window_focused(" << std::hex << window << std::dec << ")" << std::endl;
-    return false;
+    if (window == MAIN_WINDOW) {
+        return true;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
+    return customWindow->hasFocus(); // TODO: Check if this actually works
 }
 
 extern "C" WINAPI const char* set_window_texture(HWND window, HWND texturePtr) {
@@ -245,6 +324,7 @@ extern "C" WINAPI void destroy_window(HWND window) {
         return;
     }
     CustomWindow* customWindow = (CustomWindow*)window;
+    customWindow->setWindowOpacity(0);
     customWindow->close();
     delete customWindow;
 }
@@ -262,7 +342,8 @@ extern "C" WINAPI const char* show_window(HWND window) {
         return "";
     }
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->show();
+    customWindow->targetOpacity = 1;
+    customWindow->updateThings();
     return "";
 }
 
@@ -272,7 +353,8 @@ extern "C" WINAPI const char* hide_window(HWND window) {
         return "";
     }
     CustomWindow* customWindow = (CustomWindow*)window;
-    // customWindow->hide();
+    customWindow->targetOpacity = 0;
+    customWindow->updateThings();
     return "";
 }
 
@@ -287,4 +369,18 @@ void __stdcall render(int eventID) {
 extern "C" WINAPI void* get_render_event_func() {
     // std::cerr << "get_render_event_func()" << std::endl;
     return (void*)render;
+}
+
+extern "C" WINAPI bool get_window_fullscreen(HWND window) {
+    std::cerr << "get_window_fullscreen(" << std::hex << window << std::dec << ")" << std::endl;
+    return false;
+}
+
+extern "C" WINAPI bool set_window_fullscreen(HWND window, bool mode) {
+    std::cerr << "set_window_fullscreen(" << std::hex << window << std::dec << ", " << boolToStr(mode) << ")" << std::endl;
+    return false; // Unused?
+}
+
+extern "C" WINAPI void set_window_frame_visible(HWND window, bool visible) {
+    std::cerr << "set_window_frame_visible(" << std::hex << window << std::dec << ", " << boolToStr(visible) << ")" << std::endl;
 }

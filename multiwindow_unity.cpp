@@ -17,19 +17,38 @@
 void* MAIN_WINDOW = (void*)0x12345;
 bool createdApplication = false;
 
+void updateAll();
+
+class CustomApplication : public QApplication {
+public:
+    CustomApplication(int &argc, char** argv) : QApplication(argc, argv) {
+        this->setQuitOnLastWindowClosed(false);
+    }
+
+    void updateCustom() {
+        updateAll();
+    }
+
+    void startRunning() {
+        // QTimer* updateTimer = new QTimer();
+        // connect(updateTimer, &QTimer::timeout, this, QOverload<>::of(&CustomApplication::updateCustom));
+        // updateTimer->start(10);
+
+        this->exec();
+    }
+};
+
+CustomApplication* app;
+
 void createApplication() {
     if (createdApplication) return;
     createdApplication = true;
     qputenv("QT_QPA_PLATFORM", "xcb");
 
-    std::cerr << "Create new application" << std::endl;
-    int argc = 0;
-    QApplication* app = new QApplication(argc, {});
-    app->setQuitOnLastWindowClosed(false);
-    std::thread([&app] {
-        std::cerr << "Executing application" << std::endl;
-        QEventLoop eventLoop;
-        eventLoop.exec(QEventLoop::ApplicationExec);
+    std::thread([] {
+        int argc = 0;
+        app = new CustomApplication(argc, {});
+        app->startRunning();
     }).detach();
 }
 
@@ -122,6 +141,11 @@ public:
 };
 
 std::vector<CustomWindow*> allCustomWindows;
+std::mutex customWindowMutex;
+
+void updateAll() {
+    std::cerr << "updateAll" << std::endl;
+}
 
 std::string boolToStr(bool value) {
     return value ? "true" : "false";
@@ -146,7 +170,9 @@ extern "C" WINAPI const char* set_window_title(HANDLE window, char* title) {
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->setWindowTitle(title);
+    QMetaObject::invokeMethod(customWindow, [customWindow, title]() {
+        customWindow->setWindowTitle(title);
+    }, Qt::QueuedConnection);
 
     return unused;
 }
@@ -208,8 +234,11 @@ extern "C" WINAPI void set_window_position(HANDLE window, int x, int y) {
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->setTargetMove(x, y);
-    customWindow->updateThings();
+
+    QMetaObject::invokeMethod(customWindow, [customWindow, x, y]() {
+        customWindow->setTargetMove(x, y);
+        customWindow->updateThings();
+    }, Qt::QueuedConnection);
 }
 
 extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, int h) {
@@ -222,9 +251,11 @@ extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, in
     if (customWindow->targetX != x || customWindow->targetY != y || customWindow->targetWidth != w || customWindow->targetHeight != h) {
         std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
     }
-    customWindow->setTargetMove(x, y);
-    customWindow->setTargetSize(w, h);
-    customWindow->updateThings();
+    QMetaObject::invokeMethod(customWindow, [customWindow, x, y, w, h]() {
+        customWindow->setTargetMove(x, y);
+        customWindow->setTargetSize(w, h);
+        customWindow->updateThings();
+    }, Qt::QueuedConnection);
     return "";
 }
 
@@ -244,8 +275,10 @@ extern "C" WINAPI void set_window_size(HANDLE window, int w, int h) {
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->setTargetSize(w, h);
-    customWindow->updateThings();
+    QMetaObject::invokeMethod(app, [customWindow, w, h]() {
+        customWindow->setTargetSize(w, h);
+        customWindow->updateThings();
+    }, Qt::QueuedConnection);
 }
 
 struct FFIResult {
@@ -267,14 +300,17 @@ extern "C" WINAPI FFIResult new_window(
         << boolToStr(opaque) << ", allowFullscreen: "
         << boolToStr(allowFullscreen) << ")"
         << std::endl;
-    
-    CustomWindow* customWindow = new CustomWindow();
-    customWindow->setWindowTitle(title);
-    customWindow->setTargetMove(x, y);
-    customWindow->setTargetSize(w, h);
-    customWindow->updateThings();
-    allCustomWindows.push_back(customWindow);
-    customWindow->show();
+
+    CustomWindow* customWindow = nullptr;
+    QMetaObject::invokeMethod(app, [&customWindow, title, x, y, w, h]() {
+        customWindow = new CustomWindow();
+        customWindow->setWindowTitle(title);
+        customWindow->setTargetMove(x, y);
+        customWindow->setTargetSize(w, h);
+        customWindow->updateThings();
+        allCustomWindows.push_back(customWindow);
+        customWindow->show();
+    }, Qt::BlockingQueuedConnection);
 
     FFIResult result;
     result.status = 1;
@@ -362,10 +398,12 @@ extern "C" WINAPI void destroy_window(HWND window) {
         return;
     }
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->setWindowOpacity(0);
-    customWindow->close();
-    allCustomWindows.erase(std::find(allCustomWindows.begin(), allCustomWindows.end(), customWindow));
-    delete customWindow;
+    QMetaObject::invokeMethod(app, [customWindow]() {
+        customWindow->setWindowOpacity(0);
+        customWindow->close();
+        allCustomWindows.erase(std::find(allCustomWindows.begin(), allCustomWindows.end(), customWindow));
+        delete customWindow;
+    }, Qt::QueuedConnection);
 }
 
 
@@ -381,8 +419,10 @@ extern "C" WINAPI const char* show_window(HWND window) {
         return "";
     }
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->targetOpacity = 1;
-    customWindow->updateThings();
+    QMetaObject::invokeMethod(app, [customWindow]() {
+        customWindow->targetOpacity = 1;
+        customWindow->updateThings();
+    }, Qt::QueuedConnection);
     return "";
 }
 
@@ -392,8 +432,10 @@ extern "C" WINAPI const char* hide_window(HWND window) {
         return "";
     }
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->targetOpacity = 0;
-    customWindow->updateThings();
+    QMetaObject::invokeMethod(app, [customWindow]() {
+        customWindow->targetOpacity = 0;
+        customWindow->updateThings();
+    }, Qt::QueuedConnection);
     return "";
 }
 
@@ -403,9 +445,9 @@ extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
 
 void __stdcall render(int eventID) {
     // std::cerr << "render(" << eventID << ")" << std::endl;
-    for (auto customWindow : allCustomWindows) {
-        customWindow->repaint();
-    }
+    // for (auto customWindow : allCustomWindows) {
+    //     customWindow->repaint();
+    // }
 }
 
 extern "C" WINAPI void* get_render_event_func() {

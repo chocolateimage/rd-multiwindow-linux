@@ -13,6 +13,7 @@
 #include <QtWidgets>
 #include <unistd.h>
 #include <thread>
+#include <xcb/xcb.h>
 
 void* MAIN_WINDOW = (void*)0x12345;
 bool createdApplication = false;
@@ -62,6 +63,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved
 }
 
 
+    
 class CustomWindow : public QWidget {
 public:
     int targetX;
@@ -191,15 +193,15 @@ extern "C" WINAPI Size get_window_size(HANDLE window) {
     // std::cerr << "get_window_size(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
         Size size;
-        size.width = 150;
-        size.height = 150;
+        size.width = 700;
+        size.height = 400;
         return size;
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
     Size size;
-    size.width = customWindow->targetWidth / 2;
-    size.height = customWindow->targetHeight / 2;
+    size.width = 700;
+    size.height = 400;
     return size;
 }
 
@@ -440,7 +442,22 @@ extern "C" WINAPI const char* hide_window(HWND window) {
 }
 
 extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
-    // std::cerr << "arrange_windows(" << count << ")" << std::endl;
+    auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
+    auto connection = x11Application->connection();
+
+    std::vector<CustomWindow*> windowList;
+    for (int i = 0; i < count; i++) {
+        if (windows[i] == MAIN_WINDOW) continue;
+        windowList.push_back((CustomWindow*)windows[i]);
+    }
+
+    for (int i = 0; i < windowList.size() - 1; i++) {
+        xcb_configure_window(
+            connection,
+            windowList[i]->window()->winId(),
+            XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE,
+            (WId[]){ windowList[i + 1]->window()->winId(), XCB_STACK_MODE_BELOW });
+    }
 }
 
 void __stdcall render(int eventID) {

@@ -88,9 +88,14 @@ public:
     int targetWidth;
     int targetHeight;
     float targetOpacity;
+    bool targetDecorations = true;
     QLabel* testLabel;
     bool isVisible = true;
 
+    bool _lastDecorations = true;
+
+    int cutoffX;
+    int cutoffY;
 
     ID3D11Resource* resource = nullptr;
     ID3D11Texture2D* texture = nullptr;
@@ -164,7 +169,7 @@ public:
         ctx->Release();
     }
 
-    void setDecorations(bool hasDecorations) {
+    void _setDecorations(bool hasDecorations) {
         auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
         auto connection = x11Application->connection();
 
@@ -201,11 +206,14 @@ public:
     }
 
     void updateThings() {
+        auto screen = this->screen();
+        auto screenGeometry = screen->availableGeometry();
         int finalX = this->targetX;
         int finalY = this->targetY;
         int finalWidth = this->targetWidth;
         int finalHeight = this->targetHeight;
         float finalOpacity = this->targetOpacity;
+        bool finalDecorations = targetDecorations;
 
         if (finalWidth > 5000) {
             finalWidth = 5000;
@@ -217,15 +225,48 @@ public:
         if (finalX < 0 - finalWidth) {
             finalOpacity = 0;
         }
-        if (finalX > 50000) { // TODO: Use screen size
+        if (finalX > screenGeometry.width()) {
             finalOpacity = 0;
         }
         if (finalY < 0 - finalHeight) {
             finalOpacity = 0;
         }
-        if (finalY > 50000) { // TODO: Use screen size
+        if (finalY > screenGeometry.height()) {
             finalOpacity = 0;
         }
+
+        cutoffX = 0;
+        cutoffY = 0;
+
+        int titleBarHeight = 30;
+
+        // Offscreen top/left
+        if (finalX < 0) {
+            finalWidth += finalX;
+            cutoffX = finalX;
+            finalX = 0;
+        }
+        if (finalY < titleBarHeight) {
+            finalDecorations = false;
+        }
+        if (finalY < 0) {
+            finalHeight += finalY;
+            cutoffY = finalY;
+            finalY = 0;
+        }
+
+        // Offscreen bottom/right
+        int rightEdge = screenGeometry.width() - finalWidth;
+        int bottomEdge = screenGeometry.height() - finalHeight;
+        if (finalX > rightEdge) {
+            int difference = finalX - rightEdge;
+            finalWidth -= difference;
+        }
+        if (finalY > bottomEdge) {
+            int difference = finalY - bottomEdge;
+            finalHeight -= difference;
+        }
+
         if (finalWidth < 5) {
             finalOpacity = 0;
             finalWidth = 5;
@@ -242,6 +283,11 @@ public:
 
         this->setGeometry(finalX, finalY, finalWidth, finalHeight);
         this->setWindowOpacity(finalOpacity);
+
+        if (finalDecorations != _lastDecorations) {
+            this->_lastDecorations = finalDecorations;
+            this->_setDecorations(finalDecorations);
+        }
     }
 
     void paintEvent(QPaintEvent* paintEvent) override {
@@ -253,7 +299,12 @@ public:
             return;
         }
         
-        painter.drawImage(this->rect(), this->qtImage->flipped(), this->qtImage->rect());
+        painter.drawImage(QRect(
+            this->cutoffX,
+            this->cutoffY,
+            this->targetWidth,
+            this->targetHeight
+        ), this->qtImage->flipped(), this->qtImage->rect());
         qtImageMutex.unlock();
     }
 
@@ -261,9 +312,10 @@ public:
         if (this->qtImage != nullptr) {
             delete this->qtImage;
         }
-        
-        SAFE_RELEASE(this->texture);
-        SAFE_RELEASE(this->stagingTexture);
+
+        // For some reason this segfaults often:
+        // SAFE_RELEASE(this->texture);
+        // SAFE_RELEASE(this->stagingTexture);
         delete this->testLabel;
     }
 };
@@ -442,13 +494,13 @@ extern "C" WINAPI FFIResult new_window(
     CustomWindow* customWindow = nullptr;
     QMetaObject::invokeMethod(app, [&customWindow, title, x, y, w, h, frameless]() {
         customWindow = new CustomWindow();
+        customWindow->targetDecorations = !frameless;
         customWindow->setWindowTitle(title);
         customWindow->setTargetMove(x, y);
         customWindow->setTargetSize(w, h);
         customWindow->updateThings();
         allCustomWindows.push_back(customWindow);
         customWindow->show();
-        customWindow->setDecorations(!frameless);
     }, Qt::BlockingQueuedConnection);
 
     FFIResult result;
@@ -639,7 +691,7 @@ extern "C" WINAPI void set_window_frame_visible(HWND window, bool visible) {
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->setDecorations(visible);
+    customWindow->targetDecorations = visible;
 }
 
 static IUnityInterfaces* s_UnityInterfaces = NULL;

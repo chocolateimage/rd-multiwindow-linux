@@ -22,10 +22,19 @@
 #define SAFE_RELEASE(a) if (a) { a->Release(); a = NULL; }
 
 void* MAIN_WINDOW = (void*)0x12345;
+HWND main_window_handle;
+int main_window_x = 0;
+int main_window_y = 0;
+int main_window_width = 800;
+int main_window_height = 600;
 bool createdApplication = false;
 bool appReady = false;
 
 void updateAll();
+
+std::string boolToStr(bool value) {
+    return value ? "true" : "false";
+}
 
 class CustomApplication : public QApplication {
 public:
@@ -100,10 +109,24 @@ void createApplication() {
     }).detach();
 }
 
+BOOL CALLBACK findMainWindowHandleCallback(HWND hwnd, LPARAM lParam) {
+    RECT rect;
+    GetWindowRect(hwnd, &rect);
+    if (rect.bottom > 100) {
+        main_window_handle = hwnd;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+void findMainWindowHandle() {
+    EnumThreadWindows(GetCurrentThreadId(), findMainWindowHandleCallback, 0);
+}
+
 extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved) {
     // fprintf(stderr, "[multiwindow_unity] DllMain();\n");
     if (reason == DLL_PROCESS_ATTACH) {
-        createApplication();
+        // createApplication();
     }
 
     return TRUE;
@@ -370,8 +393,21 @@ void updateAll() {
     }
 }
 
-std::string boolToStr(bool value) {
-    return value ? "true" : "false";
+int MAIN_WINDOW_GEOMETRY_SKIP = 0xFEAB12;
+void setMainWindowGeometry(int x, int y, int w, int h) {
+    if (x != MAIN_WINDOW_GEOMETRY_SKIP) main_window_x = x;
+    if (y != MAIN_WINDOW_GEOMETRY_SKIP) main_window_y = y;
+    if (w != MAIN_WINDOW_GEOMETRY_SKIP) main_window_width = w;
+    if (h != MAIN_WINDOW_GEOMETRY_SKIP) main_window_height = h;
+
+    if (x < -1500 || y < -1500) {
+        SetWindowLongPtr(main_window_handle, GWL_EXSTYLE, GetWindowLongPtr(main_window_handle, GWL_EXSTYLE) | WS_EX_LAYERED);
+        SetLayeredWindowAttributes(main_window_handle, 0, 0, LWA_ALPHA);
+        return;
+    }
+
+    SetWindowLongPtr(main_window_handle, GWL_EXSTYLE, GetWindowLongPtr(main_window_handle, GWL_EXSTYLE) & ~WS_EX_LAYERED);
+    SetWindowPos(main_window_handle, NULL, main_window_x, main_window_y, main_window_width, main_window_height, 0);
 }
 
 extern "C" WINAPI HANDLE get_main_window() {
@@ -414,8 +450,8 @@ extern "C" WINAPI Size get_window_size(HANDLE window) {
     // std::cerr << "get_window_size(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
         Size size;
-        size.width = 700;
-        size.height = 400;
+        size.width = main_window_width;
+        size.height = main_window_height;
         return size;
     }
 
@@ -430,8 +466,8 @@ extern "C" WINAPI Size get_view_size(HANDLE window) {
     // std::cerr << "get_view_size(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
         Size size;
-        size.width = 700;
-        size.height = 400;
+        size.width = main_window_width;
+        size.height = main_window_height;
         return size;
     }
 
@@ -446,8 +482,8 @@ extern "C" WINAPI Size get_window_position(HANDLE window) {
     std::cerr << "get_window_position(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
         Size size;
-        size.width = 150;
-        size.height = 150;
+        size.width = main_window_x;
+        size.height = main_window_y;
         return size;
     }
 
@@ -461,6 +497,7 @@ extern "C" WINAPI Size get_window_position(HANDLE window) {
 extern "C" WINAPI void set_window_position(HANDLE window, int x, int y) {
     std::cerr << "set_window_position(" << std::hex << window << std::dec << ", " << x << ", " << y << ")" << std::endl;
     if (window == MAIN_WINDOW) {
+        setMainWindowGeometry(x, y, MAIN_WINDOW_GEOMETRY_SKIP, MAIN_WINDOW_GEOMETRY_SKIP);
         return;
     }
 
@@ -475,6 +512,7 @@ extern "C" WINAPI void set_window_position(HANDLE window, int x, int y) {
 extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, int h) {
     if (window == MAIN_WINDOW) {
         std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
+        setMainWindowGeometry(x, y, w, h);
         return "";
     }
     
@@ -502,6 +540,7 @@ extern "C" WINAPI const char* move_window_to_top(HANDLE window) {
 extern "C" WINAPI void set_window_size(HANDLE window, int w, int h) {
     std::cerr << "set_window_size(" << std::hex << window << std::dec << ", " << w << ", " << h << ")" << std::endl;
     if (window == MAIN_WINDOW) {
+        setMainWindowGeometry(MAIN_WINDOW_GEOMETRY_SKIP, MAIN_WINDOW_GEOMETRY_SKIP, w, h);
         return;
     }
 
@@ -776,6 +815,7 @@ static void UNITY_INTERFACE_API
 }
 
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces* unityInterfaces) {
+    findMainWindowHandle();
     createApplication();
     while (!appReady) usleep(100);
 
@@ -803,10 +843,10 @@ bool WINAPI CustomGetWindowRect(
     }
 
     if (hWnd == MAIN_WINDOW) {
-        lpRect->left = 800;
-        lpRect->top = 600;
-        lpRect->right = 1000;
-        lpRect->bottom = 800;
+        lpRect->left = main_window_x;
+        lpRect->top = main_window_y;
+        lpRect->right = main_window_x + main_window_width;
+        lpRect->bottom = main_window_y + main_window_height;
         return true;
     }
 

@@ -592,17 +592,19 @@ extern "C" WINAPI FFIResult new_window(
 
 extern "C" WINAPI const char* focus_window(HWND window) {
     std::cerr << "focus_window(" << std::hex << window << std::dec << ")" << std::endl;
+    SetForegroundWindow(window);
+    SetActiveWindow(window);
     return "";
 }
 
 extern "C" WINAPI bool is_window_focused(HWND window) {
     // std::cerr << "is_window_focused(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
-        return true;
+        return GetActiveWindow() == main_window_handle;
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
-    return customWindow->hasFocus(); // TODO: Check if this actually works
+    return customWindow->isActiveWindow();
 }
 
 extern "C" WINAPI const char* set_window_texture(HWND window, HWND texturePtr) {

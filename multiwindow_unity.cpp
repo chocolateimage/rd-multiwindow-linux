@@ -73,8 +73,14 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved
     return TRUE;
 }
 
+struct MotifWmHints {
+    uint32_t flags;
+    uint32_t functions;
+    uint32_t decorations;
+    int32_t  input_mode;
+    uint32_t status;
+};
 
-    
 class CustomWindow : public QWidget {
 public:
     int targetX;
@@ -98,6 +104,8 @@ public:
     QMutex qtImageMutex;
 
     CustomWindow() {
+        setAttribute(Qt::WA_TranslucentBackground);
+
         this->targetX = 0;
         this->targetY = 0;
         this->targetWidth = 1;
@@ -154,6 +162,32 @@ public:
         this->qtImage = new QImage((uint8_t*)mapped.pData, desc.Width, desc.Height, mapped.RowPitch, QImage::Format_ARGB32);
         qtImageMutex.unlock();
         ctx->Release();
+    }
+
+    void setDecorations(bool hasDecorations) {
+        auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
+        auto connection = x11Application->connection();
+
+        MotifWmHints hints = {
+            .flags = 2,
+            .decorations = hasDecorations
+        };
+
+        xcb_intern_atom_cookie_t cookie = xcb_intern_atom(connection, 0, strlen("_MOTIF_WM_HINTS"), "_MOTIF_WM_HINTS");
+        xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(connection, cookie, NULL);
+
+        xcb_change_property(
+            connection,
+            XCB_PROP_MODE_REPLACE,
+            window()->winId(),
+            reply->atom,
+            reply->atom,
+            32,
+            5,
+            &hints
+        );
+
+        free(reply);
     }
 
     void setTargetMove(int x, int y) {
@@ -406,7 +440,7 @@ extern "C" WINAPI FFIResult new_window(
         << std::endl;
 
     CustomWindow* customWindow = nullptr;
-    QMetaObject::invokeMethod(app, [&customWindow, title, x, y, w, h]() {
+    QMetaObject::invokeMethod(app, [&customWindow, title, x, y, w, h, frameless]() {
         customWindow = new CustomWindow();
         customWindow->setWindowTitle(title);
         customWindow->setTargetMove(x, y);
@@ -414,6 +448,7 @@ extern "C" WINAPI FFIResult new_window(
         customWindow->updateThings();
         allCustomWindows.push_back(customWindow);
         customWindow->show();
+        customWindow->setDecorations(!frameless);
     }, Qt::BlockingQueuedConnection);
 
     FFIResult result;
@@ -599,6 +634,12 @@ extern "C" WINAPI bool set_window_fullscreen(HWND window, bool mode) {
 
 extern "C" WINAPI void set_window_frame_visible(HWND window, bool visible) {
     std::cerr << "set_window_frame_visible(" << std::hex << window << std::dec << ", " << boolToStr(visible) << ")" << std::endl;
+    if (window == MAIN_WINDOW) {
+        return;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
+    customWindow->setDecorations(visible);
 }
 
 static IUnityInterfaces* s_UnityInterfaces = NULL;

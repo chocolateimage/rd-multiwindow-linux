@@ -41,9 +41,9 @@ public:
     }
 
     void startRunning() {
-        QTimer* updateTimer = new QTimer();
-        connect(updateTimer, &QTimer::timeout, this, QOverload<>::of(&CustomApplication::updateCustom));
-        updateTimer->start(10);
+        // QTimer* updateTimer = new QTimer();
+        // connect(updateTimer, &QTimer::timeout, this, QOverload<>::of(&CustomApplication::updateCustom));
+        // updateTimer->start(10);
 
         appReady = true;
         this->exec();
@@ -612,6 +612,9 @@ extern "C" WINAPI void present_window(HWND window) {
     }
     CustomWindow* customWindow = (CustomWindow*)window;
     customWindow->copyTexture();
+    QMetaObject::invokeMethod(app, [customWindow]() {
+        customWindow->repaint();
+    }, Qt::QueuedConnection);
 }
 
 

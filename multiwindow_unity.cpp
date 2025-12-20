@@ -33,11 +33,11 @@ public:
     CustomApplication(int &argc, char** argv) : QApplication(argc, argv) {
         this->setQuitOnLastWindowClosed(false);
     }
-    
+
     void updateCustom() {
         updateAll();
     }
-    
+
     void startRunning() {
         // QTimer* updateTimer = new QTimer();
         // connect(updateTimer, &QTimer::timeout, this, QOverload<>::of(&CustomApplication::updateCustom));
@@ -45,13 +45,6 @@ public:
 
         appReady = true;
         this->exec();
-    }
-
-    void prepareDevice() {
-        // if (this->device != nullptr) return;
-        // std::cerr << "D3D11CreateDevice thread " << std::this_thread::get_id() << std::endl;
-        // D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, 99999, &this->device, nullptr, &this->context);
-        // std::cerr << "Device created" << std::endl;
     }
 };
 
@@ -114,7 +107,6 @@ public:
     }
 
     void setTexture(ID3D11Resource* resource) {
-        std::cerr << "setTexture thread " << std::this_thread::get_id() << std::endl;
         if (this->qtImage != nullptr) {
             delete this->qtImage;
         }
@@ -122,10 +114,8 @@ public:
         this->stagingTexture = nullptr;
         this->resource = resource;
         this->texture = nullptr;
-        std::cerr << "setTexture -> queryinterface" << std::endl;
         resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
         texture->GetDesc(&desc);
-        std::cerr << "Texture info: " << desc.Width << " x " << desc.Height << std::endl;
         
         stagingDesc = desc;
         stagingDesc.Usage = D3D11_USAGE_STAGING;
@@ -135,33 +125,21 @@ public:
         
         HRESULT returnCode;
         
-        std::cerr << "setTexture -> createtexture" << std::endl;
         returnCode = app->device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
         if (returnCode != 0) {
             std::cerr << "CreateTexture2D ERROR: " << std::hex << returnCode << std::dec << std::endl;
         }
 
-        // this->testLabel->setPixmap(this->qtImage);
-        // this->testLabel->setScaledContents(true);
-        
-        // std::cerr << "setTexture -> copytexture" << std::endl;
         this->copyTexture(false);
-        std::cerr << "setTexture -> done" << std::endl;
     }
     
     void copyTexture(bool unmap) {
-        std::cerr << "copyTexture thread " << std::this_thread::get_id() << std::endl;
         ID3D11DeviceContext* ctx = NULL;
         app->device->GetImmediateContext(&ctx);
         if (unmap) {
-            std::cerr << "copyTexture -> unmap" << std::endl;
             ctx->Unmap(stagingTexture, 0);
         }
-        std::cerr << "copyTexture -> copyresource" << std::endl;
         ctx->CopyResource(stagingTexture, texture);
-        ctx->Flush();
-        Sleep(0);
-        std::cerr << "copyTexture -> map" << std::endl;
         HRESULT returnCode = ctx->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
         if (returnCode != 0) {
             std::cerr << "Map ERROR: " << std::hex << returnCode << std::dec << std::endl;
@@ -171,10 +149,8 @@ public:
         if (this->qtImage != nullptr) {
             delete this->qtImage;
         }
-        std::cerr << "copyTexture -> qimage" << std::endl;
         this->qtImage = new QImage((uint8_t*)mapped.pData, desc.Width, desc.Height, mapped.RowPitch, QImage::Format_RGBA8888);
         qtImageMutex.unlock();
-        std::cerr << "copyTexture -> done" << std::endl;
         ctx->Release();
     }
 
@@ -238,9 +214,6 @@ public:
             return;
         }
         
-        // auto data = (uint8_t*)mapped.pData;
-        
-        // painter.fillRect(rect(), QColor(data[0], data[1], data[2]));
         painter.drawImage(this->rect(), *this->qtImage, this->qtImage->rect());
         qtImageMutex.unlock();
     }
@@ -462,40 +435,8 @@ extern "C" WINAPI const char* set_window_texture(HWND window, HWND texturePtr) {
     }
 
     
-    app->prepareDevice();
     CustomWindow* customWindow = (CustomWindow*)window;
-    // QMetaObject::invokeMethod(app, [customWindow, texturePtr]() {
-        customWindow->setTexture((ID3D11Resource*)texturePtr);
-    // }, Qt::QueuedConnection);
-
-    // HRESULT returnCode;
-
-    // ID3D11Resource* resource = (ID3D11Resource*)texturePtr;
-    // ID3D11Texture2D* texture = nullptr;
-    // resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
-    // D3D11_TEXTURE2D_DESC desc;
-    // texture->GetDesc(&desc);
-    // std::cerr << "Texture info: " << desc.Width << " x " << desc.Height << std::endl;
-
-    // D3D11_TEXTURE2D_DESC stagingDesc = desc;
-    // stagingDesc.Usage = D3D11_USAGE_STAGING;
-    // stagingDesc.BindFlags = 0;
-    // stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    // stagingDesc.MiscFlags = 0;
-
-    // ID3D11Texture2D* stagingTexture = nullptr;
-    // returnCode = app->device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
-    // if (returnCode != 0) {
-    //     std::cerr << "CreateTexture2D ERROR: " << std::hex << returnCode << std::dec << std::endl;
-    // }
-
-    // app->context->CopyResource(stagingTexture, texture);
-
-    // D3D11_MAPPED_SUBRESOURCE mapped;
-    // returnCode = app->context->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
-    // if (returnCode != 0) {
-    //     std::cerr << "Map ERROR: " << std::hex << returnCode << std::dec << std::endl;
-    // }
+    customWindow->setTexture((ID3D11Resource*)texturePtr);
     return "";
 }
 
@@ -573,9 +514,10 @@ extern "C" WINAPI void present_window(HWND window) {
         return;
     }
     CustomWindow* customWindow = (CustomWindow*)window;
-    // QMetaObject::invokeMethod(app, [customWindow]() {
-        customWindow->copyTexture(true);
-    // }, Qt::QueuedConnection);
+    customWindow->copyTexture(true);
+    QMetaObject::invokeMethod(app, [customWindow]() {
+        customWindow->repaint();
+    });
 }
 
 
@@ -677,40 +619,29 @@ static void UNITY_INTERFACE_API
         case kUnityGfxDeviceEventShutdown:
         {
             s_RendererType = kUnityGfxRendererNull;
-            std::cerr << "  kUnityGfxDeviceEventShutdown" << std::endl;
             break;
         }
         case kUnityGfxDeviceEventBeforeReset:
         {
-            std::cerr << "  kUnityGfxDeviceEventBeforeReset" << std::endl;
             break;
         }
         case kUnityGfxDeviceEventAfterReset:
         {
-            std::cerr << "  kUnityGfxDeviceEventAfterReset" << std::endl;
             break;
         }
     };
 }
 
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces* unityInterfaces) {
-    std::cerr << "UnityPluginLoad" << std::endl;
     createApplication();
     while (!appReady) usleep(100);
 
     s_UnityInterfaces = unityInterfaces;
-    std::cerr << "UnityPluginLoad2" << std::endl;
     s_Graphics = unityInterfaces->Get<IUnityGraphics>();
-    std::cerr << "UnityPluginLoad3" << std::endl;
     
     s_Graphics->RegisterDeviceEventCallback(OnGraphicsDeviceEvent);
-    std::cerr << "UnityPluginLoad4" << std::endl;
     
     // Run OnGraphicsDeviceEvent(initialize) manually on plugin load
     // to not miss the event in case the graphics device is already initialized
     OnGraphicsDeviceEvent(kUnityGfxDeviceEventInitialize);
-    std::cerr << "UnityPluginLoadeddd" << std::endl;
 }
-
-
-

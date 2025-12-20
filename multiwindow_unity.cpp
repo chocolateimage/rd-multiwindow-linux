@@ -167,6 +167,9 @@ public:
     QImage* qtImage = nullptr;
     QMutex qtImageMutex;
 
+    QPixmap iconPixmap;
+    QIcon* iconIcon = nullptr;
+
     CustomWindow() {
         setAttribute(Qt::WA_TranslucentBackground);
         setWindowFlag(Qt::WindowStaysOnTopHint);
@@ -372,10 +375,26 @@ public:
         qtImageMutex.unlock();
     }
 
+    void setIcon(QImage* image) {
+        if (iconIcon != nullptr) {
+            delete iconIcon;
+            iconIcon = nullptr;
+        }
+
+        if (image == nullptr) return;
+
+        iconPixmap = QPixmap::fromImage(image->flipped());
+        iconIcon = new QIcon(iconPixmap);
+
+        this->setWindowIcon(*iconIcon);
+    }
+
     ~CustomWindow() {
         if (this->qtImage != nullptr) {
             delete this->qtImage;
         }
+
+        setIcon(nullptr);
 
         // For some reason this segfaults often:
         // SAFE_RELEASE(this->texture);
@@ -619,21 +638,30 @@ extern "C" WINAPI const char* set_window_texture(HWND window, HWND texturePtr) {
     return "";
 }
 
-extern "C" WINAPI FFIResult create_icon(void* buffer, int size) {
-    std::cerr << "create_icon(" << size << " bytes)" << std::endl;
+extern "C" WINAPI FFIResult create_icon(void* buffer, int width) {
+    std::cerr << "create_icon(" << width << " width)" << std::endl;
+    auto image = new QImage((uchar*)buffer, width, width, width * 4, QImage::Format_ARGB32);
     FFIResult result;
     result.status = 1;
-    result.data = (void*)0xdd;
+    result.data = (void*)image;
     result.error = (char*)"Not an error, I promise";
     return result;
 }
 
 extern "C" WINAPI void destroy_icon(HWND icon) {
     std::cerr << "destroy_icon(" << std::hex << icon << std::dec << ")" << std::endl;
+    QImage* image = (QImage*)icon;
+    delete image;
 }
 
 extern "C" WINAPI void set_window_icon(HWND window, HWND icon) {
     std::cerr << "set_window_icon(" << std::hex << window << std::dec << ", " << std::hex << icon << std::dec << ")" << std::endl;
+    if (window == MAIN_WINDOW) {
+        return;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
+    customWindow->setIcon((QImage*)icon);
 }
 
 extern "C" WINAPI const char* enable_input(HWND window) {

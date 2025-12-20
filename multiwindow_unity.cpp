@@ -149,7 +149,7 @@ public:
         if (this->qtImage != nullptr) {
             delete this->qtImage;
         }
-        this->qtImage = new QImage((uint8_t*)mapped.pData, desc.Width, desc.Height, mapped.RowPitch, QImage::Format_RGBA8888);
+        this->qtImage = new QImage((uint8_t*)mapped.pData, desc.Width, desc.Height, mapped.RowPitch, QImage::Format_ARGB32);
         qtImageMutex.unlock();
         ctx->Release();
     }
@@ -214,7 +214,7 @@ public:
             return;
         }
         
-        painter.drawImage(this->rect(), *this->qtImage, this->qtImage->rect());
+        painter.drawImage(this->rect(), this->qtImage->flipped(), this->qtImage->rect());
         qtImageMutex.unlock();
     }
 

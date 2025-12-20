@@ -52,9 +52,45 @@ public:
 
 CustomApplication* app;
 
+bool WINAPI CustomGetWindowRect(
+    HWND   hWnd,
+    LPRECT lpRect
+);
+
+void writeJump(void* memory, void* function) {
+    DWORD oldProtect;
+    VirtualProtect(memory, 14, PAGE_EXECUTE_READWRITE, &oldProtect);
+
+    uint8_t* p = (uint8_t*)memory;
+    p[0] = 0x48;
+    p[1] = 0xB8;
+    *(uint64_t*)(p + 2) = (uint64_t)function;
+    p[10] = 0xFF;
+    p[11] = 0xE0;
+    p[12] = 0x90;
+    p[13] = 0x90;
+
+    VirtualProtect(memory, 14, oldProtect, &oldProtect);
+}
+
+void hookIntoDLL() {
+    HMODULE user32 = GetModuleHandleA("user32.dll");
+    void* target = (void*)GetProcAddress(user32, "GetWindowRect");
+
+    writeJump(target, (void*)CustomGetWindowRect);
+    FlushInstructionCache(GetCurrentProcess(), NULL, 0);
+
+    RECT rect;
+    bool testReturn = GetWindowRect((HWND)0x987, &rect);
+    if (!testReturn || rect.left != 123 || rect.top != 456 || rect.right != 789 || rect.bottom != 987) {
+        std::cerr << "Error hooking GetWindowRect! Incorrect return values." << std::endl;
+    }
+}
+
 void createApplication() {
     if (createdApplication) return;
     createdApplication = true;
+    hookIntoDLL();
     qputenv("QT_QPA_PLATFORM", "xcb");
 
     std::thread([] {
@@ -361,7 +397,7 @@ extern "C" WINAPI const char* set_window_title(HANDLE window, char* title) {
 
 extern "C" WINAPI HANDLE __win32_get_hwnd(HANDLE window) {
     // std::cerr << "__win32_get_hwnd(" << std::hex << window << std::dec << ")" << std::endl;
-    return (void*)0xDEADBEEF;
+    return window;
 }
 
 struct Size {
@@ -746,4 +782,42 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnit
     // Run OnGraphicsDeviceEvent(initialize) manually on plugin load
     // to not miss the event in case the graphics device is already initialized
     OnGraphicsDeviceEvent(kUnityGfxDeviceEventInitialize);
+}
+
+bool WINAPI CustomGetWindowRect(
+    HWND   hWnd,
+    LPRECT lpRect
+) {
+    std::cerr << "CustomGetWindowRect " << std::hex << hWnd << std::dec << std::endl;
+    if (hWnd == (HWND)0x987) {
+        lpRect->left = 123;
+        lpRect->top = 456;
+        lpRect->right = 789;
+        lpRect->bottom = 987;
+        return true;
+    }
+
+    if (hWnd == MAIN_WINDOW) {
+        lpRect->left = 800;
+        lpRect->top = 600;
+        lpRect->right = 1000;
+        lpRect->bottom = 800;
+        return true;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)hWnd;
+    if (std::find(allCustomWindows.begin(), allCustomWindows.end(), customWindow) == allCustomWindows.end()) {
+        // Not found. Not our window.
+        lpRect->left = 0;
+        lpRect->top = 0;
+        lpRect->right = 0;
+        lpRect->bottom = 0;
+        return false;
+    }
+
+    lpRect->left = customWindow->targetX;
+    lpRect->top = customWindow->targetY;
+    lpRect->right = customWindow->targetX + customWindow->targetWidth;
+    lpRect->bottom = customWindow->targetY + customWindow->targetHeight;
+    return true;
 }

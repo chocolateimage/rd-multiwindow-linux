@@ -29,3 +29,4 @@
 29 stdcall set_window_fullscreen (ptr long) set_window_fullscreen
 30 stdcall set_window_frame_visible (ptr long) set_window_frame_visible
 31 stdcall focus_window (ptr) focus_window
+32 stdcall UnityPluginLoad (ptr) UnityPluginLoad

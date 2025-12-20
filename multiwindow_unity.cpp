@@ -125,7 +125,7 @@ public:
     int targetHeight;
     float targetOpacity;
     bool targetDecorations = true;
-    QLabel* testLabel;
+    // QLabel* testLabel;
     bool isVisible = true;
 
     bool _lastDecorations = true;
@@ -146,6 +146,8 @@ public:
 
     CustomWindow() {
         setAttribute(Qt::WA_TranslucentBackground);
+        setWindowFlag(Qt::WindowStaysOnTopHint);
+        setWindowFlag(Qt::WindowDoesNotAcceptFocus);
 
         this->targetX = 0;
         this->targetY = 0;
@@ -153,9 +155,9 @@ public:
         this->targetHeight = 1;
         this->targetOpacity = 1;
 
-        testLabel = new QLabel("Example Text", this);
-        testLabel->setStyleSheet("QLabel { color: white; font-size: 24px; }");
-        testLabel->show();
+        // testLabel = new QLabel("Example Text", this);
+        // testLabel->setStyleSheet("QLabel { color: white; font-size: 24px; }");
+        // testLabel->show();
     }
 
     void setTexture(ID3D11Resource* resource) {
@@ -242,7 +244,7 @@ public:
     }
 
     void updateThings() {
-        auto screen = this->screen();
+        auto screen = app->primaryScreen();
         auto screenGeometry = screen->availableGeometry();
         int finalX = this->targetX;
         int finalY = this->targetY;
@@ -303,6 +305,9 @@ public:
             finalHeight -= difference;
         }
 
+        finalX += screenGeometry.x();
+        finalY += screenGeometry.y();
+
         if (finalWidth < 5) {
             finalOpacity = 0;
             finalWidth = 5;
@@ -314,8 +319,8 @@ public:
 
         isVisible = finalOpacity > 0;
 
-        testLabel->setText(QString("Position: %1, %2\nSize: %3 x %4").arg(QString::number(finalX), QString::number(finalY), QString::number(finalWidth), QString::number(finalHeight)));
-        testLabel->setGeometry(0, 0, finalWidth, finalHeight);
+        // testLabel->setText(QString("Position: %1, %2\nSize: %3 x %4").arg(QString::number(targetX), QString::number(targetY), QString::number(targetWidth), QString::number(targetHeight)));
+        // testLabel->setGeometry(0, 0, finalWidth, finalHeight);
 
         this->setGeometry(finalX, finalY, finalWidth, finalHeight);
         this->setWindowOpacity(finalOpacity);
@@ -352,7 +357,7 @@ public:
         // For some reason this segfaults often:
         // SAFE_RELEASE(this->texture);
         // SAFE_RELEASE(this->stagingTexture);
-        delete this->testLabel;
+        // delete this->testLabel;
     }
 };
 
@@ -474,9 +479,9 @@ extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, in
     }
     
     CustomWindow* customWindow = (CustomWindow*)window;
-    if (customWindow->targetX != x || customWindow->targetY != y || customWindow->targetWidth != w || customWindow->targetHeight != h) {
-        std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
-    }
+    // if (customWindow->targetX != x || customWindow->targetY != y || customWindow->targetWidth != w || customWindow->targetHeight != h) {
+    //     std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
+    // }
     QMetaObject::invokeMethod(customWindow, [customWindow, x, y, w, h]() {
         customWindow->setTargetMove(x, y);
         customWindow->setTargetSize(w, h);
@@ -788,7 +793,7 @@ bool WINAPI CustomGetWindowRect(
     HWND   hWnd,
     LPRECT lpRect
 ) {
-    std::cerr << "CustomGetWindowRect " << std::hex << hWnd << std::dec << std::endl;
+    // std::cerr << "CustomGetWindowRect " << std::hex << hWnd << std::dec << std::endl;
     if (hWnd == (HWND)0x987) {
         lpRect->left = 123;
         lpRect->top = 456;

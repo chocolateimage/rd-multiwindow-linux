@@ -19,6 +19,8 @@
 #include <thread>
 #include <xcb/xcb.h>
 
+#define SAFE_RELEASE(a) if (a) { a->Release(); a = NULL; }
+
 void* MAIN_WINDOW = (void*)0x12345;
 bool createdApplication = false;
 bool appReady = false;
@@ -39,9 +41,9 @@ public:
     }
 
     void startRunning() {
-        // QTimer* updateTimer = new QTimer();
-        // connect(updateTimer, &QTimer::timeout, this, QOverload<>::of(&CustomApplication::updateCustom));
-        // updateTimer->start(10);
+        QTimer* updateTimer = new QTimer();
+        connect(updateTimer, &QTimer::timeout, this, QOverload<>::of(&CustomApplication::updateCustom));
+        updateTimer->start(10);
 
         appReady = true;
         this->exec();
@@ -81,6 +83,7 @@ public:
     int targetHeight;
     float targetOpacity;
     QLabel* testLabel;
+    bool isVisible = true;
 
 
     ID3D11Resource* resource = nullptr;
@@ -130,15 +133,14 @@ public:
             std::cerr << "CreateTexture2D ERROR: " << std::hex << returnCode << std::dec << std::endl;
         }
 
-        this->copyTexture(false);
+        this->copyTexture();
     }
     
-    void copyTexture(bool unmap) {
+    void copyTexture() {
+        if (!isVisible) return;
         ID3D11DeviceContext* ctx = NULL;
         app->device->GetImmediateContext(&ctx);
-        if (unmap) {
-            ctx->Unmap(stagingTexture, 0);
-        }
+        ctx->Unmap(stagingTexture, 0);
         ctx->CopyResource(stagingTexture, texture);
         HRESULT returnCode = ctx->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
         if (returnCode != 0) {
@@ -199,6 +201,8 @@ public:
             finalHeight = 5;
         }
 
+        isVisible = finalOpacity > 0;
+
         testLabel->setText(QString("Position: %1, %2\nSize: %3 x %4").arg(QString::number(finalX), QString::number(finalY), QString::number(finalWidth), QString::number(finalHeight)));
         testLabel->setGeometry(0, 0, finalWidth, finalHeight);
 
@@ -208,6 +212,7 @@ public:
 
     void paintEvent(QPaintEvent* paintEvent) override {
         QPainter painter(this);
+        if (!isVisible) return;
         qtImageMutex.lock();
         if (this->qtImage == nullptr) {
             qtImageMutex.unlock();
@@ -219,10 +224,13 @@ public:
     }
 
     ~CustomWindow() {
-        delete this->testLabel;
         if (this->qtImage != nullptr) {
             delete this->qtImage;
         }
+        
+        SAFE_RELEASE(this->texture);
+        SAFE_RELEASE(this->stagingTexture);
+        delete this->testLabel;
     }
 };
 
@@ -230,7 +238,9 @@ std::vector<CustomWindow*> allCustomWindows;
 std::mutex customWindowMutex;
 
 void updateAll() {
-    std::cerr << "updateAll" << std::endl;
+    for (auto window : allCustomWindows) {
+        window->repaint();
+    }
 }
 
 std::string boolToStr(bool value) {
@@ -514,10 +524,7 @@ extern "C" WINAPI void present_window(HWND window) {
         return;
     }
     CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->copyTexture(true);
-    QMetaObject::invokeMethod(app, [customWindow]() {
-        customWindow->repaint();
-    });
+    customWindow->copyTexture();
 }
 
 
@@ -601,7 +608,6 @@ static UnityGfxRenderer s_RendererType = kUnityGfxRendererNull;
 static void UNITY_INTERFACE_API
     OnGraphicsDeviceEvent(UnityGfxDeviceEventType eventType)
 {
-    std::cerr << "OnGraphicsDeviceEvent" << std::endl;
     switch (eventType)
     {
         case kUnityGfxDeviceEventInitialize:

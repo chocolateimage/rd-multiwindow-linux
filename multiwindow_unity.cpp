@@ -365,6 +365,12 @@ void CustomWindow::setIcon(QImage* image) {
     this->setWindowIcon(*iconIcon);
 }
 
+void CustomWindow::closeEvent(QCloseEvent* closeEvent) {
+    if (!isClosing) {
+        closeEvent->ignore();
+    }
+}
+
 CustomWindow::~CustomWindow() {
     if (this->qtImage != nullptr) {
         delete this->qtImage;
@@ -675,6 +681,7 @@ extern "C" WINAPI void destroy_window(HWND window) {
     }
     CustomWindow* customWindow = (CustomWindow*)window;
     QMetaObject::invokeMethod(app, [customWindow]() {
+        customWindow->isClosing = true;
         customWindow->setWindowOpacity(0);
         customWindow->close();
         allCustomWindows.erase(std::find(allCustomWindows.begin(), allCustomWindows.end(), customWindow));

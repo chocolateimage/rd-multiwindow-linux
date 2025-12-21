@@ -11,6 +11,7 @@ public:
     bool targetDecorations = true;
     // QLabel* testLabel;
     bool isVisible = true;
+    bool isClosing = false;
 
     bool _lastDecorations = true;
 
@@ -40,5 +41,6 @@ public:
     void updateThings();
     void paintEvent(QPaintEvent* paintEvent) override;
     void setIcon(QImage* image);
+    void closeEvent(QCloseEvent* closeEvent) override;
     ~CustomWindow();
 };

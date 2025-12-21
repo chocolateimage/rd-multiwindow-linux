@@ -1,5 +1,8 @@
 # Rhythm Doctor Multi Window Plugin for Linux
 
+> [!NOTE]
+> Only KDE Plasmsa (KWin) is supported. You can try to use it on other desktop environments/window managers, but it may break.
+
 To build, you need these packages:
 
 ```bash

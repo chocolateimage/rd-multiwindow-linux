@@ -201,7 +201,7 @@ void CustomWindow::setTexture(ID3D11Resource* resource) {
     resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
     texture->GetDesc(&desc);
 
-    this->qtImage = new QImage(desc.Width, desc.Height, QImage::Format_ARGB32);
+    this->qtImage = new QImage(desc.Width, desc.Height, QImage::Format_ARGB32_Premultiplied);
     
     stagingDesc = desc;
     stagingDesc.Usage = D3D11_USAGE_STAGING;

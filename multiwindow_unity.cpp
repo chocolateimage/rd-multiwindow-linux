@@ -114,7 +114,9 @@ void hookIntoDLL() {
     HMODULE user32 = GetModuleHandleA("user32.dll");
     void* target = (void*)GetProcAddress(user32, "GetWindowRect");
 
-    originalGetWindowRect = (GetWindowRect_t)createTrampoline(target, 12);
+    // UNCOMMENT THE LINE BELOW to fix window opening. As a consequence it may crash a lot.
+    // originalGetWindowRect = (GetWindowRect_t)createTrampoline(target, 12);
+
     writeJump(target, (void*)CustomGetWindowRect);
     FlushInstructionCache(GetCurrentProcess(), NULL, 0);
 
@@ -902,7 +904,11 @@ bool WINAPI CustomGetWindowRect(
     CustomWindow* customWindow = (CustomWindow*)hWnd;
     if (std::find(allCustomWindows.begin(), allCustomWindows.end(), customWindow) == allCustomWindows.end()) {
         // Not found. Not our window.
-        return originalGetWindowRect(hWnd, lpRect);
+        if (originalGetWindowRect != NULL) {
+            return originalGetWindowRect(hWnd, lpRect);
+        }
+
+        return false;
     }
 
     lpRect->left = customWindow->targetX;

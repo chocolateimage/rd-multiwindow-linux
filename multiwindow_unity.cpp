@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <thread>
 #include <xcb/xcb.h>
+#include "multiwindow_unity.hpp"
 
 #define SAFE_RELEASE(a) if (a) { a->Release(); a = NULL; }
 
@@ -29,6 +30,8 @@ int main_window_width = 800;
 int main_window_height = 600;
 bool createdApplication = false;
 bool appReady = false;
+
+std::vector<CustomWindow*> allCustomWindows;
 
 void updateAll();
 
@@ -45,15 +48,13 @@ public:
         this->setQuitOnLastWindowClosed(false);
     }
 
-    void updateCustom() {
-        updateAll();
+    void repaintAllWindows() {
+        for (auto customWindow : allCustomWindows) {
+            customWindow->repaint();
+        }
     }
 
     void startRunning() {
-        // QTimer* updateTimer = new QTimer();
-        // connect(updateTimer, &QTimer::timeout, this, QOverload<>::of(&CustomApplication::updateCustom));
-        // updateTimer->start(10);
-
         appReady = true;
         this->exec();
     }
@@ -140,277 +141,244 @@ struct MotifWmHints {
     uint32_t status;
 };
 
-class CustomWindow : public QWidget {
-public:
-    int targetX;
-    int targetY;
-    int targetWidth;
-    int targetHeight;
-    float targetOpacity;
-    bool targetDecorations = true;
-    // QLabel* testLabel;
-    bool isVisible = true;
+// ---- Start of CustomWindow ---- 
 
-    bool _lastDecorations = true;
+CustomWindow::CustomWindow() {
+    setAttribute(Qt::WA_TranslucentBackground);
+    setWindowFlag(Qt::WindowStaysOnTopHint);
+    setWindowFlag(Qt::WindowDoesNotAcceptFocus);
 
-    int cutoffX;
-    int cutoffY;
+    this->targetX = 0;
+    this->targetY = 0;
+    this->targetWidth = 1;
+    this->targetHeight = 1;
+    this->targetOpacity = 1;
 
-    ID3D11Resource* resource = nullptr;
-    ID3D11Texture2D* texture = nullptr;
-    D3D11_TEXTURE2D_DESC desc;
+    // testLabel = new QLabel("Example Text", this);
+    // testLabel->setStyleSheet("QLabel { color: white; font-size: 24px; }");
+    // testLabel->show();
+}
 
-    ID3D11Texture2D* stagingTexture = nullptr;
-    D3D11_TEXTURE2D_DESC stagingDesc;
-
-    D3D11_MAPPED_SUBRESOURCE mapped;
-    QImage* qtImage = nullptr;
-    QMutex qtImageMutex;
-
-    QPixmap iconPixmap;
-    QIcon* iconIcon = nullptr;
-
-    CustomWindow() {
-        setAttribute(Qt::WA_TranslucentBackground);
-        setWindowFlag(Qt::WindowStaysOnTopHint);
-        setWindowFlag(Qt::WindowDoesNotAcceptFocus);
-
-        this->targetX = 0;
-        this->targetY = 0;
-        this->targetWidth = 1;
-        this->targetHeight = 1;
-        this->targetOpacity = 1;
-
-        // testLabel = new QLabel("Example Text", this);
-        // testLabel->setStyleSheet("QLabel { color: white; font-size: 24px; }");
-        // testLabel->show();
+void CustomWindow::setTexture(ID3D11Resource* resource) {
+    if (this->qtImage != nullptr) {
+        delete this->qtImage;
     }
+    this->qtImage = nullptr;
+    this->stagingTexture = nullptr;
+    this->resource = resource;
+    this->texture = nullptr;
+    resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
+    texture->GetDesc(&desc);
 
-    void setTexture(ID3D11Resource* resource) {
-        if (this->qtImage != nullptr) {
-            delete this->qtImage;
-        }
-        this->qtImage = nullptr;
-        this->stagingTexture = nullptr;
-        this->resource = resource;
-        this->texture = nullptr;
-        resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
-        texture->GetDesc(&desc);
-        
-        stagingDesc = desc;
-        stagingDesc.Usage = D3D11_USAGE_STAGING;
-        stagingDesc.BindFlags = 0;
-        stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        stagingDesc.MiscFlags = 0;
-        
-        HRESULT returnCode;
-        
-        returnCode = app->device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
-        if (returnCode != 0) {
-            std::cerr << "CreateTexture2D ERROR: " << std::hex << returnCode << std::dec << std::endl;
-        }
-
-        this->copyTexture();
-    }
+    this->qtImage = new QImage(desc.Width, desc.Height, QImage::Format_ARGB32);
     
-    void copyTexture() {
-        if (!isVisible) return;
-        ID3D11DeviceContext* ctx = NULL;
-        app->device->GetImmediateContext(&ctx);
-        ctx->Unmap(stagingTexture, 0);
-        ctx->CopyResource(stagingTexture, texture);
-        HRESULT returnCode = ctx->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
-        if (returnCode != 0) {
-            std::cerr << "Map ERROR: " << std::hex << returnCode << std::dec << std::endl;
-        }
-        
-        qtImageMutex.lock();
-        if (this->qtImage != nullptr) {
-            delete this->qtImage;
-        }
-        this->qtImage = new QImage((uint8_t*)mapped.pData, desc.Width, desc.Height, mapped.RowPitch, QImage::Format_ARGB32);
-        qtImageMutex.unlock();
-        ctx->Release();
+    stagingDesc = desc;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.BindFlags = 0;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    stagingDesc.MiscFlags = 0;
+    
+    HRESULT returnCode;
+    
+    returnCode = app->device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
+    if (returnCode != 0) {
+        std::cerr << "CreateTexture2D ERROR: " << std::hex << returnCode << std::dec << std::endl;
     }
 
-    void _setDecorations(bool hasDecorations) {
-        auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
-        auto connection = x11Application->connection();
+    this->copyTexture();
+}
 
-        MotifWmHints hints = {
-            .flags = 2,
-            .decorations = hasDecorations
-        };
-
-        xcb_intern_atom_cookie_t cookie = xcb_intern_atom(connection, 0, strlen("_MOTIF_WM_HINTS"), "_MOTIF_WM_HINTS");
-        xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(connection, cookie, NULL);
-
-        xcb_change_property(
-            connection,
-            XCB_PROP_MODE_REPLACE,
-            window()->winId(),
-            reply->atom,
-            reply->atom,
-            32,
-            5,
-            &hints
-        );
-
-        free(reply);
+void CustomWindow::copyTexture() {
+    if (!isVisible) return;
+    ID3D11DeviceContext* ctx = NULL;
+    app->device->GetImmediateContext(&ctx);
+    ctx->CopyResource(stagingTexture, texture);
+    HRESULT returnCode = ctx->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
+    if (returnCode != 0) {
+        std::cerr << "Map ERROR: " << std::hex << returnCode << std::dec << std::endl;
     }
 
-    void setTargetMove(int x, int y) {
-        this->targetX = x;
-        this->targetY = y;
+    int bytesPerLine = qtImage->bytesPerLine();
+    int height = desc.Height;
+    uchar* startingBits = qtImage->bits();
+    uchar* source = (uchar*)mapped.pData;
+
+    for (int i = 0; i < height; i++) {
+        int invertedY = (height - i - 1);
+        memcpy(startingBits + i * bytesPerLine, source + invertedY * bytesPerLine, bytesPerLine);
     }
 
-    void setTargetSize(int w, int h) {
-        this->targetWidth = w;
-        this->targetHeight = h;
+    ctx->Unmap(stagingTexture, 0);
+    ctx->Release();
+}
+
+void CustomWindow::_setDecorations(bool hasDecorations) {
+    auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
+    auto connection = x11Application->connection();
+
+    MotifWmHints hints = {
+        .flags = 2,
+        .decorations = hasDecorations
+    };
+
+    xcb_intern_atom_cookie_t cookie = xcb_intern_atom(connection, 0, strlen("_MOTIF_WM_HINTS"), "_MOTIF_WM_HINTS");
+    xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(connection, cookie, NULL);
+
+    xcb_change_property(
+        connection,
+        XCB_PROP_MODE_REPLACE,
+        window()->winId(),
+        reply->atom,
+        reply->atom,
+        32,
+        5,
+        &hints
+    );
+
+    free(reply);
+}
+
+void CustomWindow::setTargetMove(int x, int y) {
+    this->targetX = x;
+    this->targetY = y;
+}
+
+void CustomWindow::setTargetSize(int w, int h) {
+    this->targetWidth = w;
+    this->targetHeight = h;
+}
+
+void CustomWindow::updateThings() {
+    auto screen = app->primaryScreen();
+    auto screenGeometry = screen->availableGeometry();
+    int finalX = this->targetX;
+    int finalY = this->targetY;
+    int finalWidth = this->targetWidth;
+    int finalHeight = this->targetHeight;
+    float finalOpacity = this->targetOpacity;
+    bool finalDecorations = targetDecorations;
+
+    if (finalWidth > 5000) {
+        finalWidth = 5000;
+    }
+    if (finalHeight > 5000) {
+        finalHeight = 5000;
     }
 
-    void updateThings() {
-        auto screen = app->primaryScreen();
-        auto screenGeometry = screen->availableGeometry();
-        int finalX = this->targetX;
-        int finalY = this->targetY;
-        int finalWidth = this->targetWidth;
-        int finalHeight = this->targetHeight;
-        float finalOpacity = this->targetOpacity;
-        bool finalDecorations = targetDecorations;
-
-        if (finalWidth > 5000) {
-            finalWidth = 5000;
-        }
-        if (finalHeight > 5000) {
-            finalHeight = 5000;
-        }
-
-        if (finalX < 0 - finalWidth) {
-            finalOpacity = 0;
-        }
-        if (finalX > screenGeometry.width()) {
-            finalOpacity = 0;
-        }
-        if (finalY < 0 - finalHeight) {
-            finalOpacity = 0;
-        }
-        if (finalY > screenGeometry.height()) {
-            finalOpacity = 0;
-        }
-
-        cutoffX = 0;
-        cutoffY = 0;
-
-        int titleBarHeight = 30;
-
-        // Offscreen top/left
-        if (finalX < 0) {
-            finalWidth += finalX;
-            cutoffX = finalX;
-            finalX = 0;
-        }
-        if (finalY < titleBarHeight) {
-            finalDecorations = false;
-        }
-        if (finalY < 0) {
-            finalHeight += finalY;
-            cutoffY = finalY;
-            finalY = 0;
-        }
-
-        // Offscreen bottom/right
-        int rightEdge = screenGeometry.width() - finalWidth;
-        int bottomEdge = screenGeometry.height() - finalHeight;
-        if (finalX > rightEdge) {
-            int difference = finalX - rightEdge;
-            finalWidth -= difference;
-        }
-        if (finalY > bottomEdge) {
-            int difference = finalY - bottomEdge;
-            finalHeight -= difference;
-        }
-
-        finalX += screenGeometry.x();
-        finalY += screenGeometry.y();
-
-        if (finalWidth < 5) {
-            finalOpacity = 0;
-            finalWidth = 5;
-        }
-        if (finalHeight < 5) {
-            finalOpacity = 0;
-            finalHeight = 5;
-        }
-
-        isVisible = finalOpacity > 0;
-
-        // testLabel->setText(QString("Position: %1, %2\nSize: %3 x %4").arg(QString::number(targetX), QString::number(targetY), QString::number(targetWidth), QString::number(targetHeight)));
-        // testLabel->setGeometry(0, 0, finalWidth, finalHeight);
-
-        this->setGeometry(finalX, finalY, finalWidth, finalHeight);
-        this->setWindowOpacity(finalOpacity);
-
-        if (finalDecorations != _lastDecorations) {
-            this->_lastDecorations = finalDecorations;
-            this->_setDecorations(finalDecorations);
-        }
+    if (finalX < 0 - finalWidth) {
+        finalOpacity = 0;
+    }
+    if (finalX > screenGeometry.width()) {
+        finalOpacity = 0;
+    }
+    if (finalY < 0 - finalHeight) {
+        finalOpacity = 0;
+    }
+    if (finalY > screenGeometry.height()) {
+        finalOpacity = 0;
     }
 
-    void paintEvent(QPaintEvent* paintEvent) override {
-        QPainter painter(this);
-        if (!isVisible) return;
-        qtImageMutex.lock();
-        if (this->qtImage == nullptr) {
-            qtImageMutex.unlock();
-            return;
-        }
-        
-        painter.drawImage(QRect(
-            this->cutoffX,
-            this->cutoffY,
-            this->targetWidth,
-            this->targetHeight
-        ), this->qtImage->flipped(), this->qtImage->rect());
-        qtImageMutex.unlock();
+    cutoffX = 0;
+    cutoffY = 0;
+
+    int titleBarHeight = 30;
+
+    // Offscreen top/left
+    if (finalX < 0) {
+        finalWidth += finalX;
+        cutoffX = finalX;
+        finalX = 0;
+    }
+    if (finalY < titleBarHeight) {
+        finalDecorations = false;
+    }
+    if (finalY < 0) {
+        finalHeight += finalY;
+        cutoffY = finalY;
+        finalY = 0;
     }
 
-    void setIcon(QImage* image) {
-        if (iconIcon != nullptr) {
-            delete iconIcon;
-            iconIcon = nullptr;
-        }
-
-        if (image == nullptr) return;
-
-        iconPixmap = QPixmap::fromImage(image->flipped());
-        iconIcon = new QIcon(iconPixmap);
-
-        this->setWindowIcon(*iconIcon);
+    // Offscreen bottom/right
+    int rightEdge = screenGeometry.width() - finalWidth;
+    int bottomEdge = screenGeometry.height() - finalHeight;
+    if (finalX > rightEdge) {
+        int difference = finalX - rightEdge;
+        finalWidth -= difference;
+    }
+    if (finalY > bottomEdge) {
+        int difference = finalY - bottomEdge;
+        finalHeight -= difference;
     }
 
-    ~CustomWindow() {
-        if (this->qtImage != nullptr) {
-            delete this->qtImage;
-        }
+    finalX += screenGeometry.x();
+    finalY += screenGeometry.y();
 
-        setIcon(nullptr);
-
-        // For some reason this segfaults often:
-        // SAFE_RELEASE(this->texture);
-        // SAFE_RELEASE(this->stagingTexture);
-        // delete this->testLabel;
+    if (finalWidth < 5) {
+        finalOpacity = 0;
+        finalWidth = 5;
     }
-};
+    if (finalHeight < 5) {
+        finalOpacity = 0;
+        finalHeight = 5;
+    }
 
-std::vector<CustomWindow*> allCustomWindows;
-std::mutex customWindowMutex;
+    isVisible = finalOpacity > 0;
 
-void updateAll() {
-    for (auto window : allCustomWindows) {
-        window->repaint();
+    // testLabel->setText(QString("Position: %1, %2\nSize: %3 x %4").arg(QString::number(targetX), QString::number(targetY), QString::number(targetWidth), QString::number(targetHeight)));
+    // testLabel->setGeometry(0, 0, finalWidth, finalHeight);
+
+    this->setGeometry(finalX, finalY, finalWidth, finalHeight);
+    this->setWindowOpacity(finalOpacity);
+
+    if (finalDecorations != _lastDecorations) {
+        this->_lastDecorations = finalDecorations;
+        this->_setDecorations(finalDecorations);
     }
 }
+
+void CustomWindow::paintEvent(QPaintEvent* paintEvent) {
+    QPainter painter(this);
+    if (!isVisible) return;
+    if (this->qtImage == nullptr) {
+        return;
+    }
+    
+    painter.drawImage(QRect(
+        this->cutoffX,
+        this->cutoffY,
+        this->targetWidth,
+        this->targetHeight
+    ), *this->qtImage, this->qtImage->rect());
+}
+
+void CustomWindow::setIcon(QImage* image) {
+    if (iconIcon != nullptr) {
+        delete iconIcon;
+        iconIcon = nullptr;
+    }
+
+    if (image == nullptr) return;
+
+    iconPixmap = QPixmap::fromImage(image->flipped());
+    iconIcon = new QIcon(iconPixmap);
+
+    this->setWindowIcon(*iconIcon);
+}
+
+CustomWindow::~CustomWindow() {
+    if (this->qtImage != nullptr) {
+        delete this->qtImage;
+    }
+
+    setIcon(nullptr);
+
+    // For some reason this segfaults often:
+    // SAFE_RELEASE(this->texture);
+    // SAFE_RELEASE(this->stagingTexture);
+    // delete this->testLabel;
+}
+
+// ---- End of CustomWindow ---- 
 
 int MAIN_WINDOW_GEOMETRY_SKIP = 0xFEAB12;
 void setMainWindowGeometry(int x, int y, int w, int h) {
@@ -717,14 +685,6 @@ extern "C" WINAPI void destroy_window(HWND window) {
 
 extern "C" WINAPI void present_window(HWND window) {
     // std::cerr << "present_window(" << std::hex << window << std::dec << ")" << std::endl;
-    if (window == MAIN_WINDOW) {
-        return;
-    }
-    CustomWindow* customWindow = (CustomWindow*)window;
-    customWindow->copyTexture();
-    QMetaObject::invokeMethod(app, [customWindow]() {
-        customWindow->repaint();
-    }, Qt::QueuedConnection);
 }
 
 
@@ -777,9 +737,10 @@ extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
 void __stdcall render(int eventID) {
     // std::cerr << "render(" << eventID << ")" << std::endl;
     for (auto customWindow : allCustomWindows) {
-        // customWindow->repaint();
-        // customWindow->copyTexture();
+        customWindow->copyTexture();
     }
+    
+    QMetaObject::invokeMethod(app, &CustomApplication::repaintAllWindows, Qt::QueuedConnection);
 }
 
 extern "C" WINAPI void* get_render_event_func() {

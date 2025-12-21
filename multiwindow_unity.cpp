@@ -62,6 +62,9 @@ public:
 
 CustomApplication* app;
 
+typedef int (WINAPI *GetWindowRect_t)(HWND, LPRECT);
+GetWindowRect_t originalGetWindowRect = NULL;
+
 bool WINAPI CustomGetWindowRect(
     HWND   hWnd,
     LPRECT lpRect
@@ -69,7 +72,7 @@ bool WINAPI CustomGetWindowRect(
 
 void writeJump(void* memory, void* function) {
     DWORD oldProtect;
-    VirtualProtect(memory, 14, PAGE_EXECUTE_READWRITE, &oldProtect);
+    VirtualProtect(memory, 12, PAGE_EXECUTE_READWRITE, &oldProtect);
 
     uint8_t* p = (uint8_t*)memory;
     p[0] = 0x48;
@@ -77,16 +80,30 @@ void writeJump(void* memory, void* function) {
     *(uint64_t*)(p + 2) = (uint64_t)function;
     p[10] = 0xFF;
     p[11] = 0xE0;
-    p[12] = 0x90;
-    p[13] = 0x90;
 
-    VirtualProtect(memory, 14, oldProtect, &oldProtect);
+    VirtualProtect(memory, 12, oldProtect, &oldProtect);
+}
+
+void* createTrampoline(void* target, uint8_t stolenBytes) {
+    uint8_t* trampoline = (uint8_t*)VirtualAlloc(
+        nullptr,
+        stolenBytes + 12,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_EXECUTE_READWRITE
+    );
+
+    memcpy(trampoline, target, stolenBytes);
+
+    writeJump(trampoline + stolenBytes, (uint8_t*)target + stolenBytes);
+
+    return trampoline;
 }
 
 void hookIntoDLL() {
     HMODULE user32 = GetModuleHandleA("user32.dll");
     void* target = (void*)GetProcAddress(user32, "GetWindowRect");
 
+    originalGetWindowRect = (GetWindowRect_t)createTrampoline(target, 12);
     writeJump(target, (void*)CustomGetWindowRect);
     FlushInstructionCache(GetCurrentProcess(), NULL, 0);
 
@@ -851,11 +868,7 @@ bool WINAPI CustomGetWindowRect(
     CustomWindow* customWindow = (CustomWindow*)hWnd;
     if (std::find(allCustomWindows.begin(), allCustomWindows.end(), customWindow) == allCustomWindows.end()) {
         // Not found. Not our window.
-        lpRect->left = 0;
-        lpRect->top = 0;
-        lpRect->right = 0;
-        lpRect->bottom = 0;
-        return false;
+        return originalGetWindowRect(hWnd, lpRect);
     }
 
     lpRect->left = customWindow->targetX;

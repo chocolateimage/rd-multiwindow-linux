@@ -426,6 +426,9 @@ void ScreenSizeWindow::doTheStuff(QScreen* screen) {
     this->setWindowOpacity(0);
     this->setGeometry(screen->geometry());
     this->show();
+    QTimer::singleShot(500, [this] {
+        delete this;
+    });
 }
 
 void ScreenSizeWindow::resizeEvent(QResizeEvent* event) {
@@ -433,7 +436,7 @@ void ScreenSizeWindow::resizeEvent(QResizeEvent* event) {
     if (resizeCount != 2) return;
     QTimer::singleShot(10, [this] {
         screenGeometries[this->actualScreen] = this->frameGeometry();
-        delete this;
+        this->close();
     });
 }
 // ---- End of ScreenSizeWindow ---- 

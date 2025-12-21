@@ -30,6 +30,10 @@ int main_window_width = 800;
 int main_window_height = 600;
 bool createdApplication = false;
 bool appReady = false;
+// Need to use this hack instead of using actual "availableGeometry".
+// Maximizing invisible windows (ScreenSizeWindow) is a more reliable
+// method of getting the actual screen size without the taskbar.
+QMap<QScreen*, QRect> screenGeometries;
 
 std::vector<CustomWindow*> allCustomWindows;
 
@@ -56,6 +60,13 @@ public:
 
     void startRunning() {
         appReady = true;
+
+        for (auto screen : this->screens()) {
+            screenGeometries[screen] = screen->availableGeometry(); // Temporary until we get actual sizes later.
+            ScreenSizeWindow* screenSizeWindow = new ScreenSizeWindow();
+            screenSizeWindow->doTheStuff(screen);
+        }
+
         this->exec();
     }
 };
@@ -164,6 +175,7 @@ CustomWindow::CustomWindow() {
     setAttribute(Qt::WA_TranslucentBackground);
     setWindowFlag(Qt::WindowStaysOnTopHint);
     setWindowFlag(Qt::WindowDoesNotAcceptFocus);
+    setWindowFlag(Qt::WindowTransparentForInput);
 
     this->targetX = 0;
     this->targetY = 0;
@@ -267,7 +279,7 @@ void CustomWindow::setTargetSize(int w, int h) {
 
 void CustomWindow::updateThings() {
     auto screen = app->primaryScreen();
-    auto screenGeometry = screen->availableGeometry();
+    auto screenGeometry = screenGeometries[screen];
     int finalX = this->targetX;
     int finalY = this->targetY;
     int finalWidth = this->targetWidth;
@@ -344,6 +356,7 @@ void CustomWindow::updateThings() {
     // testLabel->setText(QString("Position: %1, %2\nSize: %3 x %4").arg(QString::number(targetX), QString::number(targetY), QString::number(targetWidth), QString::number(targetHeight)));
     // testLabel->setGeometry(0, 0, finalWidth, finalHeight);
 
+    this->setFixedSize(finalWidth, finalHeight);
     this->setGeometry(finalX, finalY, finalWidth, finalHeight);
     this->setWindowOpacity(finalOpacity);
 
@@ -402,6 +415,27 @@ CustomWindow::~CustomWindow() {
 }
 
 // ---- End of CustomWindow ---- 
+
+// ---- Start of ScreenSizeWindow ---- 
+void ScreenSizeWindow::doTheStuff(QScreen* screen) {
+    this->actualScreen = screen;
+    this->setWindowTitle("IGNORE THIS WINDOW");
+    this->setWindowFlag(Qt::WindowStaysOnBottomHint);
+    this->setWindowOpacity(0);
+    this->setGeometry(screen->geometry());
+    this->show();
+}
+
+void ScreenSizeWindow::resizeEvent(QResizeEvent* event) {
+    resizeCount++;
+    if (resizeCount != 2) return;
+    QTimer::singleShot(10, [this] {
+        screenGeometries[this->actualScreen] = this->frameGeometry();
+        delete this;
+    });
+}
+// ---- End of ScreenSizeWindow ---- 
+
 
 int MAIN_WINDOW_GEOMETRY_SKIP = 0xFEAB12;
 void setMainWindowGeometry(int x, int y, int w, int h) {

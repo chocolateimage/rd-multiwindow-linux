@@ -44,3 +44,13 @@ public:
     void closeEvent(QCloseEvent* closeEvent) override;
     ~CustomWindow();
 };
+
+class ScreenSizeWindow : public QWidget {
+public:
+    QScreen* actualScreen;
+    
+    void doTheStuff(QScreen* screen);
+    
+    int resizeCount = 0;
+    void resizeEvent(QResizeEvent* event) override;
+};

@@ -452,14 +452,14 @@ extern "C" WINAPI const char* refresh_main_window_ptr() {
     return unused;
 }
 
-extern "C" WINAPI const char* set_window_title(HANDLE window, char* title) {
+extern "C" WINAPI const char* set_window_title(HANDLE window, const char* title) {
     std::cerr << "set_window_title(" << std::hex << window << std::dec << ", " << title << ")" << std::endl;
     if (window == MAIN_WINDOW) {
         return unused;
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
-    QMetaObject::invokeMethod(customWindow, [customWindow, title]() {
+    QMetaObject::invokeMethod(customWindow, [customWindow, title = QString(title)]() {
         customWindow->setWindowTitle(title);
     }, Qt::QueuedConnection);
 

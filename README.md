@@ -1,5 +1,16 @@
 # Rhythm Doctor Multi Window Plugin for Linux
 
+[![Screenshot of a Rhythm Doctor window moving](https://party.playlook.de/public/Screenshot_20251222_165039.png)](https://youtu.be/_Lh0sd66jjI)
+
+Demonstration Videos:
+
+- [2-X All The Times](https://youtu.be/_Lh0sd66jjI)
+- [7-X Miracle Defibrillator](https://youtu.be/_Lh0sd66jjI) (outdated video)
+
+Other tools: [![Logo](https://party.playlook.de/public/qrhythmcafe-icon.png) QRhythmCafe - Download Rhythm Doctor levels](https://github.com/chocolateimage/qrhythmcafe)
+
+## Instructions
+
 > [!NOTE]
 > Only KDE Plasmsa (KWin) is supported. You can try to use it on other desktop environments/window managers, but it may break.
 
@@ -30,3 +41,5 @@ Steam's Proton doesn't work (at least not for me), so you have to manually run W
 cd "/path/to/steamapps/common/Rhythm Doctor"
 WINEPREFIX="$HOME/.winerd" wine "Rhythm Doctor.exe"
 ```
+
+If you found this plugin useful or cool, consider starring the GitHub repo!

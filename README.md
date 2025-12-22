@@ -1,6 +1,6 @@
 # Rhythm Doctor Multi Window Plugin for Linux
 
-[![Screenshot of a Rhythm Doctor window moving](https://party.playlook.de/public/Screenshot_20251222_165039.png)](https://youtu.be/_Lh0sd66jjI)
+[![GIF of a Rhythm Doctor window moving](https://party.playlook.de/public/rd-2x-loop-what-optimized.gif)](https://youtu.be/_Lh0sd66jjI)
 
 Demonstration Videos:
 

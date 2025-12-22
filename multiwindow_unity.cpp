@@ -65,9 +65,6 @@ public:
 
 CustomApplication* app;
 
-typedef int (WINAPI *GetWindowRect_t)(HWND, LPRECT);
-GetWindowRect_t originalGetWindowRect = NULL;
-
 bool WINAPI CustomGetWindowRect(
     HWND   hWnd,
     LPRECT lpRect
@@ -87,27 +84,9 @@ void writeJump(void* memory, void* function) {
     VirtualProtect(memory, 12, oldProtect, &oldProtect);
 }
 
-void* createTrampoline(void* target, uint8_t stolenBytes) {
-    uint8_t* trampoline = (uint8_t*)VirtualAlloc(
-        nullptr,
-        stolenBytes + 12,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_EXECUTE_READWRITE
-    );
-
-    memcpy(trampoline, target, stolenBytes);
-
-    writeJump(trampoline + stolenBytes, (uint8_t*)target + stolenBytes);
-
-    return trampoline;
-}
-
 void hookIntoDLL() {
     HMODULE user32 = GetModuleHandleA("user32.dll");
     void* target = (void*)GetProcAddress(user32, "GetWindowRect");
-
-    // UNCOMMENT THE LINE BELOW to fix window opening. As a consequence it may crash a lot.
-    // originalGetWindowRect = (GetWindowRect_t)createTrampoline(target, 12);
 
     writeJump(target, (void*)CustomGetWindowRect);
     FlushInstructionCache(GetCurrentProcess(), NULL, 0);
@@ -908,11 +887,10 @@ bool WINAPI CustomGetWindowRect(
     CustomWindow* customWindow = (CustomWindow*)hWnd;
     if (std::find(allCustomWindows.begin(), allCustomWindows.end(), customWindow) == allCustomWindows.end()) {
         // Not found. Not our window.
-        if (originalGetWindowRect != NULL) {
-            return originalGetWindowRect(hWnd, lpRect);
-        }
-
-        return false;
+        WINDOWINFO windowInfo;
+        bool response = GetWindowInfo(hWnd, &windowInfo);
+        *lpRect = windowInfo.rcWindow;
+        return response;
     }
 
     lpRect->left = customWindow->targetX;

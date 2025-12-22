@@ -272,14 +272,23 @@ void CustomWindow::setTargetSize(int w, int h) {
 }
 
 void CustomWindow::updateThings() {
-    auto screen = app->primaryScreen();
-    auto screenGeometry = screenGeometries[screen];
+    auto primaryScreen = app->primaryScreen();
+    auto primaryScreenGeometry = screenGeometries[primaryScreen];
+    auto unitedScreenGeometry = screenGeometries.first();
+    int smallestHeight = 999999; // KDE is buggy. Other monitors also have invisible taskbar limits.
     int finalX = this->targetX;
     int finalY = this->targetY;
     int finalWidth = this->targetWidth;
     int finalHeight = this->targetHeight;
     float finalOpacity = this->targetOpacity;
     bool finalDecorations = targetDecorations;
+
+    for (auto g : screenGeometries) {
+        unitedScreenGeometry = unitedScreenGeometry.united(g);
+        if (g.height() < smallestHeight) {
+            smallestHeight = g.height();
+        }
+    }
 
     if (finalWidth > 5000) {
         finalWidth = 5000;
@@ -288,16 +297,19 @@ void CustomWindow::updateThings() {
         finalHeight = 5000;
     }
 
+    finalX += primaryScreenGeometry.x();
+    finalY += primaryScreenGeometry.y();
+
     if (finalX < 0 - finalWidth) {
         finalOpacity = 0;
     }
-    if (finalX > screenGeometry.width()) {
+    if (finalX > unitedScreenGeometry.width()) {
         finalOpacity = 0;
     }
     if (finalY < 0 - finalHeight) {
         finalOpacity = 0;
     }
-    if (finalY > screenGeometry.height()) {
+    if (finalY > smallestHeight) {
         finalOpacity = 0;
     }
 
@@ -322,8 +334,8 @@ void CustomWindow::updateThings() {
     }
 
     // Offscreen bottom/right
-    int rightEdge = screenGeometry.width() - finalWidth;
-    int bottomEdge = screenGeometry.height() - finalHeight;
+    int rightEdge = unitedScreenGeometry.width() - finalWidth;
+    int bottomEdge = smallestHeight - finalHeight;
     if (finalX > rightEdge) {
         int difference = finalX - rightEdge;
         finalWidth -= difference;
@@ -332,9 +344,6 @@ void CustomWindow::updateThings() {
         int difference = finalY - bottomEdge;
         finalHeight -= difference;
     }
-
-    finalX += screenGeometry.x();
-    finalY += screenGeometry.y();
 
     if (finalWidth < 5) {
         finalOpacity = 0;
@@ -428,6 +437,7 @@ void ScreenSizeWindow::resizeEvent(QResizeEvent* event) {
     if (resizeCount != 2) return;
     QTimer::singleShot(10, [this] {
         screenGeometries[this->actualScreen] = this->frameGeometry();
+        qInfo() << "Screen size is" << screenGeometries[this->actualScreen] << "now" << screenGeometries.size() << "screens";
         this->close();
     });
 }

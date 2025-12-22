@@ -37,8 +37,6 @@ QMap<QScreen*, QRect> screenGeometries;
 
 std::vector<CustomWindow*> allCustomWindows;
 
-void updateAll();
-
 std::string boolToStr(bool value) {
     return value ? "true" : "false";
 }
@@ -50,12 +48,6 @@ public:
     
     CustomApplication(int &argc, char** argv) : QApplication(argc, argv) {
         this->setQuitOnLastWindowClosed(false);
-    }
-
-    void repaintAllWindows() {
-        for (auto customWindow : allCustomWindows) {
-            customWindow->repaint();
-        }
     }
 
     void startRunning() {
@@ -801,9 +793,8 @@ void __stdcall render(int eventID) {
     // std::cerr << "render(" << eventID << ")" << std::endl;
     for (auto customWindow : allCustomWindows) {
         customWindow->copyTexture();
+        QMetaObject::invokeMethod(customWindow, qOverload<>(&QWidget::repaint), Qt::QueuedConnection);
     }
-    
-    QMetaObject::invokeMethod(app, &CustomApplication::repaintAllWindows, Qt::QueuedConnection);
 }
 
 extern "C" WINAPI void* get_render_event_func() {

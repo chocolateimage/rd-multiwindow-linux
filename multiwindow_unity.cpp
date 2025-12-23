@@ -264,8 +264,9 @@ void CustomWindow::updateThings() {
 
     for (auto g : screenGeometries) {
         unitedScreenGeometry = unitedScreenGeometry.united(g);
-        if (g.height() < smallestHeight) {
-            smallestHeight = g.height();
+        int h = g.height() + primaryScreenGeometry.y();
+        if (h < smallestHeight) {
+            smallestHeight = h;
         }
     }
 

@@ -278,7 +278,6 @@ void CustomWindow::updateThings() {
     }
 
     finalX += primaryScreenGeometry.x();
-    finalY += primaryScreenGeometry.y();
 
     if (finalX < 0 - finalWidth) {
         finalOpacity = 0;
@@ -304,13 +303,13 @@ void CustomWindow::updateThings() {
         cutoffX = finalX;
         finalX = 0;
     }
-    if (finalY < titleBarHeight) {
+    if (finalY < primaryScreenGeometry.y() + titleBarHeight) {
         finalDecorations = false;
     }
-    if (finalY < 0) {
-        finalHeight += finalY;
-        cutoffY = finalY;
-        finalY = 0;
+    if (finalY < primaryScreenGeometry.y()) {
+        finalHeight += finalY - primaryScreenGeometry.y();
+        cutoffY = finalY - primaryScreenGeometry.y();
+        finalY = primaryScreenGeometry.y();
     }
 
     // Offscreen bottom/right

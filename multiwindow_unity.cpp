@@ -770,11 +770,13 @@ extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
     }
 
     for (int i = 0; i < windowList.size() - 1; i++) {
+        WId configOptions[] = { windowList[i + 1]->window()->winId(), XCB_STACK_MODE_BELOW };
         xcb_configure_window(
             connection,
             windowList[i]->window()->winId(),
             XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE,
-            (WId[]){ windowList[i + 1]->window()->winId(), XCB_STACK_MODE_BELOW });
+            configOptions
+        );
     }
 }
 

@@ -625,8 +625,10 @@ extern "C" WINAPI FFIResult new_window(
 
 extern "C" WINAPI const char* focus_window(HWND window) {
     std::cerr << "focus_window(" << std::hex << window << std::dec << ")" << std::endl;
-    SetForegroundWindow(window);
-    SetActiveWindow(window);
+    if (window == MAIN_WINDOW) {
+        SetForegroundWindow(main_window_handle);
+        SetActiveWindow(main_window_handle);
+    }
     return "";
 }
 

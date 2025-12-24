@@ -536,8 +536,8 @@ extern "C" WINAPI void set_window_position(HANDLE window, int x, int y) {
 
     CustomWindow* customWindow = (CustomWindow*)window;
 
-    QMetaObject::invokeMethod(customWindow, [customWindow, x, y]() {
-        customWindow->setTargetMove(x, y);
+    customWindow->setTargetMove(x, y);
+    QMetaObject::invokeMethod(customWindow, [customWindow]() {
         customWindow->updateThings();
     }, Qt::QueuedConnection);
 }
@@ -553,9 +553,9 @@ extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, in
     // if (customWindow->targetX != x || customWindow->targetY != y || customWindow->targetWidth != w || customWindow->targetHeight != h) {
     //     std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
     // }
-    QMetaObject::invokeMethod(customWindow, [customWindow, x, y, w, h]() {
-        customWindow->setTargetMove(x, y);
-        customWindow->setTargetSize(w, h);
+    customWindow->setTargetMove(x, y);
+    customWindow->setTargetSize(w, h);
+    QMetaObject::invokeMethod(customWindow, [customWindow]() {
         customWindow->updateThings();
     }, Qt::QueuedConnection);
     return "";
@@ -578,8 +578,8 @@ extern "C" WINAPI void set_window_size(HANDLE window, int w, int h) {
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
-    QMetaObject::invokeMethod(app, [customWindow, w, h]() {
-        customWindow->setTargetSize(w, h);
+    customWindow->setTargetSize(w, h);
+    QMetaObject::invokeMethod(app, [customWindow]() {
         customWindow->updateThings();
     }, Qt::QueuedConnection);
 }

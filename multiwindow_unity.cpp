@@ -359,6 +359,8 @@ CustomWindow::CustomWindow() {
     this->targetHeight = 1;
     this->targetOpacity = 0;
 
+    this->setFixedSize(10, 10);
+
     // testLabel = new QLabel("Example Text", this);
     // testLabel->setStyleSheet("QLabel { color: white; font-size: 24px; }");
     // testLabel->show();
@@ -550,7 +552,6 @@ void CustomWindow::updateThings() {
     // testLabel->setText(QString("Position: %1, %2\nSize: %3 x %4").arg(QString::number(targetX), QString::number(targetY), QString::number(targetWidth), QString::number(targetHeight)));
     // testLabel->setGeometry(0, 0, finalWidth, finalHeight);
 
-    this->setFixedSize(finalWidth, finalHeight);
     if (useWayland) { // Wayland doesn't support actual window movement. We have to "smuggle" data in the title to the JS plugin.
         std::string encoded = "";
         std::vector<int> smuggledInfo = {finalX, finalY, finalWidth, finalHeight, finalDecorations ? 1 : 0, this->customId, (int)waylandWindowOrder.size()};
@@ -568,6 +569,7 @@ void CustomWindow::updateThings() {
         }
         this->setWindowTitle(targetTitle + QString::fromStdString(encoded));
     } else {
+        this->setFixedSize(finalWidth, finalHeight);
         this->setGeometry(finalX, finalY, finalWidth, finalHeight);
         this->setWindowTitle(targetTitle);
         this->setWindowOpacity(finalOpacity);

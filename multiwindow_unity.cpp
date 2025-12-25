@@ -68,7 +68,8 @@ public:
 // https://youtu.be/eBC9r5WMNng
 
 const mainWindow = workspace.stackingOrder.find((win) => win.pid == appPid);
-const lastWindowArrangement = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+let lastOrder = "";
+const lastConstraints = [];
 
 function decode(caption) {
     if (!caption.endsWith("\u200B") && !caption.endsWith("\u200C")) {
@@ -136,35 +137,28 @@ workspace.windowAdded.connect((win) => {
         }
         const arrangementCount = msg[6];
         if (arrangementCount > 0) {
-            const previousOrder = [...lastWindowArrangement];
-            // print("START of changing order")
-            for (let i = 1; i < arrangementCount; i++) {
-                const bWin = msg[i + 6];
-                const aWin = msg[i + 7];
-                if (previousOrder[i - 1] == bWin && previousOrder[i] == aWin) {
-                    // print("windows are the same");
-                    continue;
+            const orderStr = JSON.stringify(msg.slice(6, 6 + arrangementCount + 1));
+            if (orderStr != lastOrder) {
+                lastOrder = orderStr;
+                for (const constraint of lastConstraints) {
+                    const bWinReal = findWindow(constraint[0]);
+                    const aWinReal = findWindow(constraint[1]);
+                    if (bWinReal != null && aWinReal != null) {
+                        workspace.unconstrain(bWinReal, aWinReal);
+                    }
                 }
-                const bWinLastReal = findWindow(previousOrder[i - 1]);
-                const aWinLastReal = findWindow(previousOrder[i]);
-                if (bWinLastReal != null && aWinLastReal != null) {
-                    // print("unconstraining");
-                    workspace.unconstrain(bWinLastReal, aWinLastReal);
-                } else { 
-                    // print("unconstrain not exist. that is okay")
+                lastConstraints.length = 0;
+                for (let i = 1; i < arrangementCount; i++) {
+                    const bWin = msg[i + 6];
+                    const aWin = msg[i + 7];
+                    const bWinReal = findWindow(bWin);
+                    const aWinReal = findWindow(aWin);
+                    if (bWinReal != null && aWinReal != null) {
+                        workspace.constrain(bWinReal, aWinReal);
+                        lastConstraints.push([bWin, aWin]);
+                    }
                 }
-                const bWinReal = findWindow(bWin);
-                const aWinReal = findWindow(aWin);
-                if (bWinReal != null && aWinReal != null) {
-                    workspace.constrain(bWinReal, aWinReal);
-                    // print("constraining");
-                } else {
-                    // print("constrain not exist. WHAT",bWin,aWin)
-                }
-                lastWindowArrangement[i - 1] = bWin;
-                lastWindowArrangement[i] = aWin;
             }
-            // print("END of changing order")
         }
     }
 

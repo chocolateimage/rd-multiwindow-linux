@@ -288,7 +288,10 @@ void checkForKWinWayland() {
 void createApplication() {
     if (createdApplication) return;
     createdApplication = true;
+#ifdef KWIN_WAYLAND
+    qInfo() << "Compiled with Wayland capabilities. Checking if it is supported.";
     checkForKWinWayland();
+#endif
     hookIntoDLL();
 
     qInfo() << "Using KWin Wayland:" << useWayland;

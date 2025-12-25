@@ -33,6 +33,10 @@ Usage:
 
 ```bash
 ./build.sh "/path/to/steamapps/common/Rhythm Doctor"
+
+# OR this if you want experimental Wayland support (only KWin is supported, else it falls back to X11)
+
+./build.sh "/path/to/steamapps/common/Rhythm Doctor" --wayland
 ```
 
 Steam's Proton doesn't work (at least not for me), so you have to manually run Wine, and in some cases in a different Wine Prefix to fix graphical issues:
@@ -43,3 +47,16 @@ WINEPREFIX="$HOME/.winerd" wine "Rhythm Doctor.exe"
 ```
 
 If you found this plugin useful or cool, consider starring the GitHub repo!
+
+## Issue Reporting
+
+Before reporting an issue, follow these troubleshooting steps:
+
+- Pull and rebuild the latest changes (`git pull` and `./build.sh ...`)
+- Try the latest Wine **Staging** release. If using a non-rolling distro, use one from [WineHQ](https://gitlab.winehq.org/wine/wine/-/wikis/Download).
+
+Put the distro you are using and desktop environment in your issue report.
+
+Make sure to launch the game in the terminal. Provide the logs (not Player.log, but you can provide that too if you want) in a new GitHub issue.
+
+If using the Wayland version, make sure to open `journalctl -ef` before launching the game, then provide the logs from there too.

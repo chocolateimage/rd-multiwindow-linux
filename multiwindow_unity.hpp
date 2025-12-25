@@ -3,6 +3,7 @@
 
 class CustomWindow : public QWidget {
 public:
+    int customId;
     int targetX;
     int targetY;
     int targetWidth;

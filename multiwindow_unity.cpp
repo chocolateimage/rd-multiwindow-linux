@@ -42,6 +42,7 @@ bool useWayland = false;
 QMap<QScreen*, QRect> screenGeometries;
 
 std::vector<CustomWindow*> allCustomWindows;
+std::vector<WId> waylandWindowOrder;
 
 std::string boolToStr(bool value) {
     return value ? "true" : "false";
@@ -67,6 +68,41 @@ public:
 // https://youtu.be/eBC9r5WMNng
 
 const mainWindow = workspace.stackingOrder.find((win) => win.pid == appPid);
+const lastWindowArrangement = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+function decode(caption) {
+    if (!caption.endsWith("\u200B") && !caption.endsWith("\u200C")) {
+        return null;
+    }
+    let encoded = "";
+    let msg = [];
+    for (const letter of caption) {
+        if (letter != "\u200B" && letter != "\u200C") continue;
+        encoded += letter == "\u200B" ? "0" : 1;
+        if (encoded.length == 24) {
+            let num = parseInt(encoded.substring(1), 2);
+            if (encoded[0] == "1") {
+                num = -num;
+            }
+            msg.push(num);
+            encoded = "";
+        }
+    }
+    return msg;
+}
+
+function findWindow(id) {
+    for (const win of workspace.windowList()) {
+        if (win.destroyed) continue;
+        if (win.pid != appPid) continue;
+        const msg = decode(win.caption);
+        if (msg == null) continue;
+        if (msg[5] == id) {
+            return win;
+        }
+    }
+    return null;
+}
 
 workspace.windowAdded.connect((win) => {
     if (win.pid != appPid) return;
@@ -76,25 +112,8 @@ workspace.windowAdded.connect((win) => {
     const frameH = win.frameGeometry.height - win.clientGeometry.height;
 
     win.captionChanged.connect(() => {
-        if (!win.caption.endsWith("\u200B") && !win.caption.endsWith("\u200C")) {
-            return;
-        }
-
-
-        let encoded = "";
-        let msg = [];
-        for (const letter of win.caption) {
-            if (letter != "\u200B" && letter != "\u200C") continue;
-            encoded += letter == "\u200B" ? "0" : 1;
-            if (encoded.length == 32) {
-                let num = parseInt(encoded.substring(1), 2);
-                if (encoded[0] == "1") {
-                    num = -num;
-                }
-                msg.push(num);
-                encoded = "";
-            }
-        }
+        const msg = decode(win.caption);
+        if (msg == null) return;
         const noBorder = msg[4] == 0;
         if (!noBorder) {
             msg[0] += frameX;
@@ -113,6 +132,38 @@ workspace.windowAdded.connect((win) => {
         win.noBorder = noBorder; // "The decision whether a window has a border or not belongs to the window manager." But Rhythm Doctor says otherwise.
         if (win.active) {
             workspace.activeWindow = mainWindow;
+        }
+        const arrangementCount = msg[6];
+        if (arrangementCount > 0) {
+            const previousOrder = [...lastWindowArrangement];
+            // print("START of changing order")
+            for (let i = 1; i < arrangementCount; i++) {
+                const bWin = msg[i + 6];
+                const aWin = msg[i + 7];
+                if (previousOrder[i - 1] == bWin && previousOrder[i] == aWin) {
+                    // print("windows are the same");
+                    continue;
+                }
+                const bWinLastReal = findWindow(previousOrder[i - 1]);
+                const aWinLastReal = findWindow(previousOrder[i]);
+                if (bWinLastReal != null && aWinLastReal != null) {
+                    // print("unconstraining");
+                    workspace.unconstrain(bWinLastReal, aWinLastReal);
+                } else { 
+                    // print("unconstrain not exist. that is okay")
+                }
+                const bWinReal = findWindow(bWin);
+                const aWinReal = findWindow(aWin);
+                if (bWinReal != null && aWinReal != null) {
+                    workspace.constrain(bWinReal, aWinReal);
+                    // print("constraining");
+                } else {
+                    // print("constrain not exist. WHAT",bWin,aWin)
+                }
+                lastWindowArrangement[i - 1] = bWin;
+                lastWindowArrangement[i] = aWin;
+            }
+            // print("END of changing order")
         }
     });
 })
@@ -292,6 +343,7 @@ CustomWindow::CustomWindow() {
     setWindowFlag(Qt::WindowDoesNotAcceptFocus);
     setWindowFlag(Qt::WindowTransparentForInput);
 
+    this->customId = rand() % 100000;
     this->targetX = 0;
     this->targetY = 0;
     this->targetWidth = 1;
@@ -492,13 +544,18 @@ void CustomWindow::updateThings() {
     this->setFixedSize(finalWidth, finalHeight);
     if (useWayland) { // Wayland doesn't support actual window movement. We have to "smuggle" data in the title to the JS plugin.
         std::string encoded = "";
-        auto smuggledInfo = {finalX, finalY, finalWidth, finalHeight, finalDecorations ? 1 : 0};
+        std::vector<int> smuggledInfo = {finalX, finalY, finalWidth, finalHeight, finalDecorations ? 1 : 0, this->customId, (int)waylandWindowOrder.size()};
+        for (auto winId : waylandWindowOrder) {
+            smuggledInfo.push_back(winId);
+        }
+        int i = 0;
         for (auto info : smuggledInfo) {
-            std::string infoEncoded = std::bitset<31>(abs(info)).to_string();
+            std::string infoEncoded = std::bitset<23>(abs(info)).to_string();
             encoded += info >= 0 ? "\u200B" : "\u200C";
             for (auto character : infoEncoded) {
                 encoded += character == '0' ? "\u200B" : "\u200C";
             }
+            i++;
         }
         this->setWindowTitle(targetTitle + QString::fromStdString(encoded));
     } else {
@@ -889,7 +946,9 @@ extern "C" WINAPI void destroy_window(HWND window) {
     CustomWindow* customWindow = (CustomWindow*)window;
     QMetaObject::invokeMethod(app, [customWindow]() {
         customWindow->isClosing = true;
-        customWindow->setWindowOpacity(0);
+        if (!useWayland) {
+            customWindow->setWindowOpacity(0);
+        }
         customWindow->close();
         allCustomWindows.erase(std::find(allCustomWindows.begin(), allCustomWindows.end(), customWindow));
         delete customWindow;
@@ -950,14 +1009,22 @@ void arrangeWindowsX11(HWND* windows, int count) {
     }
 }
 
+void arrangeWindowsWayland(HWND* windows, int count) {
+    std::vector<CustomWindow*> windowList;
+    for (int i = 0; i < count; i++) {
+        if (windows[i] == MAIN_WINDOW) continue;
+        windowList.push_back((CustomWindow*)windows[i]);
+    }
+
+    waylandWindowOrder.resize(windowList.size());
+    for (int i = 0; i < windowList.size(); i++) {
+        waylandWindowOrder[i] = windowList[windowList.size() - i - 1]->customId;
+    }
+}
+
 extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
     if (useWayland) {
-        // TODO: Implement, somehow... maybe years long of discussion
-        // KWin has some things that might be interesting:
-        // - "constrain" functions possibly?
-        // - Change focus really quickly activeWindow before setting it back to mainWindow (or the previous window) again.
-        // - Raise windows quickly
-        // - Change "always on top" setting quickly
+        arrangeWindowsWayland(windows, count);
     } else {
         arrangeWindowsX11(windows, count);
     }

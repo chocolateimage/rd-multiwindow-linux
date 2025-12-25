@@ -111,7 +111,7 @@ workspace.windowAdded.connect((win) => {
     const frameW = win.frameGeometry.width - win.clientGeometry.width;
     const frameH = win.frameGeometry.height - win.clientGeometry.height;
 
-    win.captionChanged.connect(() => {
+    function updateWindow() {
         const msg = decode(win.caption);
         if (msg == null) return;
         const noBorder = msg[4] == 0;
@@ -165,7 +165,13 @@ workspace.windowAdded.connect((win) => {
             }
             // print("END of changing order")
         }
+    }
+
+    win.captionChanged.connect(() => {
+        updateWindow();
     });
+
+    updateWindow();
 })
     )""";
 
@@ -351,7 +357,7 @@ CustomWindow::CustomWindow() {
     this->targetY = 0;
     this->targetWidth = 1;
     this->targetHeight = 1;
-    this->targetOpacity = 1;
+    this->targetOpacity = 0;
 
     // testLabel = new QLabel("Example Text", this);
     // testLabel->setStyleSheet("QLabel { color: white; font-size: 24px; }");

@@ -34,7 +34,7 @@ Usage:
 ```bash
 ./build.sh "/path/to/steamapps/common/Rhythm Doctor"
 
-# OR this if you want experimental Wayland support (only KWin is supported, else it falls back to X11)
+# OR this if you want experimental Wayland support (only KWin is supported, else it falls back to X11). This allows real offscreen windows.
 
 ./build.sh "/path/to/steamapps/common/Rhythm Doctor" --wayland
 ```

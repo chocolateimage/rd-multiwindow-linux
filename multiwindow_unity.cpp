@@ -1061,6 +1061,9 @@ extern "C" WINAPI void set_window_frame_visible(HWND window, bool visible) {
 
     CustomWindow* customWindow = (CustomWindow*)window;
     customWindow->targetDecorations = visible;
+    QMetaObject::invokeMethod(app, [customWindow]() {
+        customWindow->updateThings();
+    }, Qt::QueuedConnection);
 }
 
 static IUnityInterfaces* s_UnityInterfaces = NULL;

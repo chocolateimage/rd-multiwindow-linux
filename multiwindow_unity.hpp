@@ -9,14 +9,15 @@ public:
     int targetHeight;
     float targetOpacity;
     bool targetDecorations = true;
+    QString targetTitle;
     // QLabel* testLabel;
     bool isVisible = true;
     bool isClosing = false;
 
     bool _lastDecorations = true;
 
-    int cutoffX;
-    int cutoffY;
+    int cutoffX = 0;
+    int cutoffY = 0;
 
     ID3D11Resource* resource = nullptr;
     ID3D11Texture2D* texture = nullptr;
@@ -35,7 +36,7 @@ public:
     CustomWindow();
     void setTexture(ID3D11Resource* resource);
     void copyTexture();
-    void _setDecorations(bool hasDecorations);
+    void _setX11Decorations(bool hasDecorations);
     void setTargetMove(int x, int y);
     void setTargetSize(int w, int h);
     void updateThings();

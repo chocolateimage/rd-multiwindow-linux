@@ -14,7 +14,11 @@
 #undef __WIN64__
 #undef WINAPI_FAMILY
 #undef __NT__
+#undef interface
 #include <QtWidgets>
+#include <QDBusMessage>
+#include <QDBusConnection>
+#include <bitset>
 #include <unistd.h>
 #include <thread>
 #include <xcb/xcb.h>
@@ -22,6 +26,7 @@
 
 #define SAFE_RELEASE(a) if (a) { a->Release(); a = NULL; }
 
+QString kwinFile = "/tmp/multiwindow_unity_kwin.js";
 void* MAIN_WINDOW = (void*)0x12345;
 HWND main_window_handle;
 int main_window_x = 0;
@@ -30,6 +35,7 @@ int main_window_width = 800;
 int main_window_height = 600;
 bool createdApplication = false;
 bool appReady = false;
+bool useWayland = false;
 // Need to use this hack instead of using actual "availableGeometry".
 // Maximizing invisible windows (ScreenSizeWindow) is a more reliable
 // method of getting the actual screen size without the taskbar.
@@ -50,13 +56,131 @@ public:
         this->setQuitOnLastWindowClosed(false);
     }
 
+    bool createKWinFile() {
+        QFile file(kwinFile);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+    
+        QTextStream textStream(&file);
+        textStream << "const appPid = " << this->applicationPid();
+        textStream << R"""(
+// puts your hands up in the sky. puts your hands up in the sky. puts your puts your. PUT YOUR HANDS UP HIGH
+// https://youtu.be/eBC9r5WMNng
+
+const mainWindow = workspace.stackingOrder.find((win) => win.pid == appPid);
+
+workspace.windowAdded.connect((win) => {
+    if (win.pid != appPid) return;
+    const frameX = win.frameGeometry.x - win.clientGeometry.x;
+    const frameY = win.frameGeometry.y - win.clientGeometry.y;
+    const frameW = win.frameGeometry.width - win.clientGeometry.width;
+    const frameH = win.frameGeometry.height - win.clientGeometry.height;
+
+    win.captionChanged.connect(() => {
+        if (!win.caption.endsWith("\u200B") && !win.caption.endsWith("\u200C")) {
+            return;
+        }
+
+
+        let encoded = "";
+        let msg = [];
+        for (const letter of win.caption) {
+            if (letter != "\u200B" && letter != "\u200C") continue;
+            encoded += letter == "\u200B" ? "0" : 1;
+            if (encoded.length == 32) {
+                let num = parseInt(encoded.substring(1), 2);
+                if (encoded[0] == "1") {
+                    num = -num;
+                }
+                msg.push(num);
+                encoded = "";
+            }
+        }
+        const noBorder = msg[4] == 0;
+        if (!noBorder) {
+            msg[0] += frameX;
+            msg[1] += frameY;
+            msg[2] += frameW;
+            msg[3] += frameH;
+        }
+        win.frameGeometry = {
+            x: msg[0],
+            y: msg[1],
+            width: msg[2],
+            height: msg[3]
+        };
+        win.skipTaskbar = true;
+        win.keepAbove = true;
+        win.noBorder = noBorder; // "The decision whether a window has a border or not belongs to the window manager." But Rhythm Doctor says otherwise.
+        if (win.active) {
+            workspace.activeWindow = mainWindow;
+        }
+    });
+})
+    )""";
+
+        return true;
+    }
+
+    void removeKWinFile() {
+        QFile file(kwinFile);
+        file.remove();
+    }
+
+    void addKWinScript() {
+        if (!createKWinFile()) return;
+
+        QDBusMessage message = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin"),
+            QStringLiteral("/Scripting"),
+            QString(),
+            QStringLiteral("loadScript")
+        );
+
+        QList<QVariant> arguments;
+        arguments << QVariant(kwinFile);
+        message.setArguments(arguments);
+
+        QDBusMessage reply = QDBusConnection::sessionBus().call(message);
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            qInfo() << "KWin load script error" << reply.errorMessage();
+            QMessageBox::critical(nullptr, "RD Window Dance", "Could not load the KWin script. Please create an issue on GitHub with the logs from the Wine output.");
+            removeKWinFile();
+            return;
+        }
+
+        auto id = reply.arguments().constFirst().toInt();
+
+        message = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin"),
+            QString("/Scripting/Script") + QString::number(id),
+            QString(),
+            QStringLiteral("run")
+        );
+
+        reply = QDBusConnection::sessionBus().call(message);
+
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            qInfo() << "KWin run script error" << reply.errorMessage();
+            QMessageBox::critical(nullptr, "RD Window Dance", "Could not run the KWin script. Please create an issue on GitHub with the logs from the Wine output.");
+        }
+
+        removeKWinFile();
+    }
+
     void startRunning() {
+        if (useWayland) {
+            addKWinScript();
+        }
+
         appReady = true;
 
         for (auto screen : this->screens()) {
-            screenGeometries[screen] = screen->availableGeometry(); // Temporary until we get actual sizes later.
-            ScreenSizeWindow* screenSizeWindow = new ScreenSizeWindow();
-            screenSizeWindow->doTheStuff(screen);
+            screenGeometries[screen] = screen->availableGeometry(); // Temporary until we get actual sizes later (or use Wayland, there these are not used).
+
+            if (!useWayland) {
+                ScreenSizeWindow* screenSizeWindow = new ScreenSizeWindow();
+                screenSizeWindow->doTheStuff(screen);
+            }
         }
 
         this->exec();
@@ -98,11 +222,29 @@ void hookIntoDLL() {
     }
 }
 
+void checkForKWinWayland() {
+    if (qgetenv("XDG_SESSION_DESKTOP").toLower() != "kde") {
+        return;
+    }
+
+    if (qgetenv("XDG_SESSION_TYPE").toLower() != "wayland") {
+        return;
+    }
+
+    useWayland = true;
+}
+
 void createApplication() {
     if (createdApplication) return;
     createdApplication = true;
+    checkForKWinWayland();
     hookIntoDLL();
-    qputenv("QT_QPA_PLATFORM", "xcb");
+
+    qInfo() << "Using KWin Wayland:" << useWayland;
+    
+    if (!useWayland) {
+        qputenv("QT_QPA_PLATFORM", "xcb");
+    }
 
     std::thread([] {
         int argc = 0;
@@ -146,7 +288,7 @@ struct MotifWmHints {
 
 CustomWindow::CustomWindow() {
     setAttribute(Qt::WA_TranslucentBackground);
-    setWindowFlag(Qt::WindowStaysOnTopHint);
+    setWindowFlag(Qt::WindowStaysOnTopHint); // Does not work on Wayland, have to use JS hack above.
     setWindowFlag(Qt::WindowDoesNotAcceptFocus);
     setWindowFlag(Qt::WindowTransparentForInput);
 
@@ -214,7 +356,7 @@ void CustomWindow::copyTexture() {
     ctx->Release();
 }
 
-void CustomWindow::_setDecorations(bool hasDecorations) {
+void CustomWindow::_setX11Decorations(bool hasDecorations) {
     auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
     auto connection = x11Application->connection();
 
@@ -255,7 +397,7 @@ void CustomWindow::updateThings() {
     qreal scaling = this->devicePixelRatio();
     auto primaryScreenGeometry = screenGeometries[primaryScreen];
     auto unitedScreenGeometry = screenGeometries.first();
-    int smallestHeight = 999999; // KDE is buggy. Other monitors also have invisible taskbar limits.
+    int smallestHeight = 999999; // KDE window constraints are buggy. Other monitors also have invisible taskbar limits.
     int finalX = this->targetX / scaling;
     int finalY = this->targetY / scaling;
     int finalWidth = this->targetWidth / scaling;
@@ -263,11 +405,13 @@ void CustomWindow::updateThings() {
     float finalOpacity = this->targetOpacity;
     bool finalDecorations = targetDecorations;
 
-    for (auto g : screenGeometries) {
-        unitedScreenGeometry = unitedScreenGeometry.united(g);
-        int h = g.height() + primaryScreenGeometry.y();
-        if (h < smallestHeight) {
-            smallestHeight = h;
+    if (!useWayland) {
+        for (auto g : screenGeometries) {
+            unitedScreenGeometry = unitedScreenGeometry.united(g);
+            int h = g.height() + primaryScreenGeometry.y();
+            if (h < smallestHeight) {
+                smallestHeight = h;
+            }
         }
     }
 
@@ -278,74 +422,94 @@ void CustomWindow::updateThings() {
         finalHeight = 5000;
     }
 
-    finalX += primaryScreenGeometry.x();
+    finalX += primaryScreen->geometry().x();
 
-    if (finalX < 0 - finalWidth) {
-        finalOpacity = 0;
-    }
-    if (finalX > unitedScreenGeometry.width()) {
-        finalOpacity = 0;
-    }
-    if (finalY < 0 - finalHeight) {
-        finalOpacity = 0;
-    }
-    if (finalY > smallestHeight) {
-        finalOpacity = 0;
-    }
+    if (!useWayland) {
+        if (finalX < 0 - finalWidth) {
+            finalOpacity = 0;
+        }
+        if (finalX > unitedScreenGeometry.width()) {
+            finalOpacity = 0;
+        }
+        if (finalY < 0 - finalHeight) {
+            finalOpacity = 0;
+        }
+        if (finalY > smallestHeight) {
+            finalOpacity = 0;
+        }
 
-    cutoffX = 0;
-    cutoffY = 0;
+        cutoffX = 0;
+        cutoffY = 0;
 
-    int titleBarHeight = 30;
+        int titleBarHeight = 30;
 
-    // Offscreen top/left
-    if (finalX < 0) {
-        finalWidth += finalX;
-        cutoffX = finalX;
-        finalX = 0;
-    }
-    if (finalY < primaryScreenGeometry.y() + titleBarHeight) {
-        finalDecorations = false;
-    }
-    if (finalY < primaryScreenGeometry.y()) {
-        finalHeight += finalY - primaryScreenGeometry.y();
-        cutoffY = finalY - primaryScreenGeometry.y();
-        finalY = primaryScreenGeometry.y();
-    }
+        // Offscreen top/left
+        if (finalX < 0) {
+            finalWidth += finalX;
+            cutoffX = finalX;
+            finalX = 0;
+        }
+        if (finalY < primaryScreenGeometry.y() + titleBarHeight) {
+            finalDecorations = false;
+        }
+        if (finalY < primaryScreenGeometry.y()) {
+            finalHeight += finalY - primaryScreenGeometry.y();
+            cutoffY = finalY - primaryScreenGeometry.y();
+            finalY = primaryScreenGeometry.y();
+        }
 
-    // Offscreen bottom/right
-    int rightEdge = unitedScreenGeometry.width() - finalWidth;
-    int bottomEdge = smallestHeight - finalHeight;
-    if (finalX > rightEdge) {
-        int difference = finalX - rightEdge;
-        finalWidth -= difference;
-    }
-    if (finalY > bottomEdge) {
-        int difference = finalY - bottomEdge;
-        finalHeight -= difference;
-    }
+        // Offscreen bottom/right
+        int rightEdge = unitedScreenGeometry.width() - finalWidth;
+        int bottomEdge = smallestHeight - finalHeight;
+        if (finalX > rightEdge) {
+            int difference = finalX - rightEdge;
+            finalWidth -= difference;
+        }
+        if (finalY > bottomEdge) {
+            int difference = finalY - bottomEdge;
+            finalHeight -= difference;
+        }
 
-    if (finalWidth < 5) {
-        finalOpacity = 0;
-        finalWidth = 5;
-    }
-    if (finalHeight < 5) {
-        finalOpacity = 0;
-        finalHeight = 5;
+        if (finalWidth < 5) {
+            finalOpacity = 0;
+            finalWidth = 5;
+        }
+        if (finalHeight < 5) {
+            finalOpacity = 0;
+            finalHeight = 5;
+        }
     }
 
     isVisible = finalOpacity > 0;
+
+    if (useWayland && !isVisible) {
+        finalY = -5000; // Just put the window far away in Wayland, do not bother with actual opacity.
+    }
 
     // testLabel->setText(QString("Position: %1, %2\nSize: %3 x %4").arg(QString::number(targetX), QString::number(targetY), QString::number(targetWidth), QString::number(targetHeight)));
     // testLabel->setGeometry(0, 0, finalWidth, finalHeight);
 
     this->setFixedSize(finalWidth, finalHeight);
-    this->setGeometry(finalX, finalY, finalWidth, finalHeight);
-    this->setWindowOpacity(finalOpacity);
+    if (useWayland) { // Wayland doesn't support actual window movement. We have to "smuggle" data in the title to the JS plugin.
+        std::string encoded = "";
+        auto smuggledInfo = {finalX, finalY, finalWidth, finalHeight, finalDecorations ? 1 : 0};
+        for (auto info : smuggledInfo) {
+            std::string infoEncoded = std::bitset<31>(abs(info)).to_string();
+            encoded += info >= 0 ? "\u200B" : "\u200C";
+            for (auto character : infoEncoded) {
+                encoded += character == '0' ? "\u200B" : "\u200C";
+            }
+        }
+        this->setWindowTitle(targetTitle + QString::fromStdString(encoded));
+    } else {
+        this->setGeometry(finalX, finalY, finalWidth, finalHeight);
+        this->setWindowTitle(targetTitle);
+        this->setWindowOpacity(finalOpacity);
 
-    if (finalDecorations != _lastDecorations) {
-        this->_lastDecorations = finalDecorations;
-        this->_setDecorations(finalDecorations);
+        if (finalDecorations != _lastDecorations) {
+            this->_lastDecorations = finalDecorations;
+            this->_setX11Decorations(finalDecorations);
+        }
     }
 }
 
@@ -463,7 +627,8 @@ extern "C" WINAPI const char* set_window_title(HANDLE window, const char* title)
 
     CustomWindow* customWindow = (CustomWindow*)window;
     QMetaObject::invokeMethod(customWindow, [customWindow, title = QString(title)]() {
-        customWindow->setWindowTitle(title);
+        customWindow->targetTitle = title;
+        customWindow->updateThings();
     }, Qt::QueuedConnection);
 
     return unused;
@@ -608,7 +773,7 @@ extern "C" WINAPI FFIResult new_window(
     QMetaObject::invokeMethod(app, [&customWindow, title, x, y, w, h, frameless]() {
         customWindow = new CustomWindow();
         customWindow->targetDecorations = !frameless;
-        customWindow->setWindowTitle(title);
+        customWindow->targetTitle = title;
         customWindow->setTargetMove(x, y);
         customWindow->setTargetSize(w, h);
         customWindow->updateThings();
@@ -764,7 +929,7 @@ extern "C" WINAPI const char* hide_window(HWND window) {
     return "";
 }
 
-extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
+void arrangeWindowsX11(HWND* windows, int count) {
     auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
     auto connection = x11Application->connection();
 
@@ -782,6 +947,19 @@ extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
             XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE,
             configOptions
         );
+    }
+}
+
+extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
+    if (useWayland) {
+        // TODO: Implement, somehow... maybe years long of discussion
+        // KWin has some things that might be interesting:
+        // - "constrain" functions possibly?
+        // - Change focus really quickly activeWindow before setting it back to mainWindow (or the previous window) again.
+        // - Raise windows quickly
+        // - Change "always on top" setting quickly
+    } else {
+        arrangeWindowsX11(windows, count);
     }
 }
 

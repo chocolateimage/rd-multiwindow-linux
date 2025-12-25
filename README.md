@@ -12,7 +12,7 @@ Other tools: [![Logo](https://party.playlook.de/public/qrhythmcafe-icon.png) QRh
 ## Instructions
 
 > [!NOTE]
-> Only KDE Plasmsa (KWin) is supported. You can try to use it on other desktop environments/window managers, but it may break.
+> Only KDE Plasma (KWin) is supported. You can try to use it on other desktop environments/window managers, but it may break.
 
 To build, you need these packages:
 

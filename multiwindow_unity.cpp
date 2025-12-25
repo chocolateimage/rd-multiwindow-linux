@@ -127,6 +127,7 @@ workspace.windowAdded.connect((win) => {
             width: msg[2],
             height: msg[3]
         };
+        win.skipsCloseAnimation = true;
         win.skipTaskbar = true;
         win.keepAbove = true;
         win.noBorder = noBorder; // "The decision whether a window has a border or not belongs to the window manager." But Rhythm Doctor says otherwise.
@@ -168,6 +169,14 @@ workspace.windowAdded.connect((win) => {
     }
 
     win.captionChanged.connect(() => {
+        updateWindow();
+    });
+
+    win.minimizedChanged.connect(() => {
+        win.minimized = false;
+    });
+
+    win.interactiveMoveResizeFinished.connect(() => {
         updateWindow();
     });
 

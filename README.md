@@ -14,22 +14,88 @@ Other tools: [![Logo](https://party.playlook.de/public/qrhythmcafe-icon.png) QRh
 > [!NOTE]
 > Only KDE Plasma (KWin) is supported. You can try to use it on other desktop environments/window managers, but it may break.
 
+You can either choose from these versions:
+
+- [Native Linux](#native-linux)
+- [Proton](#proton)
+
+### Native Linux
+
+The native Linux version works with BepInEx 5. BepInEx is a mod loader for games. If you do not want to use BepInEx, use the [Proton version](#proton).
+
+1. You'll need BepInEx 5 installed. If you do not have it, follow the [install guide](https://docs.bepinex.dev/articles/user_guide/installation/index.html?tabs=tabid-nix), then also follow the [Steam guide](https://docs.bepinex.dev/articles/advanced/steam_interop.html).
+2. Download the BepInEx plugin [from this release](https://github.com/chocolateimage/rd-multiwindow-linux/releases/latest), and place it under "Rhythm Doctor/BepInEx/plugins/", so that it will look like this:
+
+    ```text
+    Rhythm Doctor/
+        BepInEx/
+            plugins/
+                LinuxWindowDancePlugin.dll <--- HERE
+        run_bepinex.sh
+        Rhythm Doctor
+    ```
+
+3. Install these packages:
+
+    ```bash
+    # Debian/Ubuntu based
+    sudo apt install pkg-config qt6-base-dev libxcb1-dev git
+
+    # Arch
+    sudo pacman -S --needed pkgconf qt6-base libxcb git
+    ```
+
+4. Clone this project:
+
+    ```bash
+    git clone https://github.com/chocolateimage/rd-multiwindow-linux.git
+    cd rd-multiwindow-linux
+    ```
+
+5. Build:
+
+    ```bash
+    ./build.sh "/path/to/steamapps/common/Rhythm Doctor"
+
+    # OR this if you want experimental Wayland support (only KWin is supported, else it falls back to X11). This allows real offscreen windows.
+
+    ./build.sh "/path/to/steamapps/common/Rhythm Doctor" --wayland
+    ```
+
+6. In the Steam compatibility settings, force the runtime to "Legacy runtime 1.0"
+    ![Legacy runtime forced](https://party.playlook.de/public/steam-rd-legacy.png)
+
+7. Open the game, go to the settings and select the window dance option in the accessibility tab. Have fun!
+
+If you found this plugin useful or cool, consider starring the GitHub repo!
+
+---
+
+### Proton
+
+This is the version when you have "Proton Experimental" selected in the compatibility list. The game would not run on Proton, but only through regular Wine which will be explained later.
+
 To build, you need these packages:
 
 ```bash
 # Debian/Ubuntu based
-sudo apt install libwine-dev pkg-config qt6-base-dev libxcb1-dev
+sudo apt install libwine-dev pkg-config qt6-base-dev libxcb1-dev git
 
 # Arch
-sudo pacman -S wine pkgconf qt6-base libxcb
+sudo pacman -S --needed wine-staging pkgconf qt6-base libxcb git
 ```
 
-> [!IMPORTANT]
-> You need Proton enabled for the game. Go to Steam, right click the game, select "Properties", go to the "Compatibility" tab, and check "Force the use of a specific Steam Play compatibility tool". Make sure to select a "Proton ..." version. I tested it with "Proton Experimental".
->
+Clone this project:
+
+```bash
+git clone https://github.com/chocolateimage/rd-multiwindow-linux.git
+cd rd-multiwindow-linux
+```
+
+> [!NOTE]
 > Note that you can no longer play the game from Steam itself after installing, you need to run the command below to run the game. To revert the change, go to the properties window, select the "Installed Files" tab, then click on "Verify Integrity of game files".
 
-Usage:
+To patch the game:
 
 ```bash
 ./build.sh "/path/to/steamapps/common/Rhythm Doctor"

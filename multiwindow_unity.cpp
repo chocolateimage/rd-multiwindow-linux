@@ -632,7 +632,9 @@ void CustomWindow::updateThings() {
         finalHeight = 5000;
     }
 
-    finalX += primaryScreen->geometry().x();
+#ifdef WITH_WINE
+finalX += primaryScreen->geometry().x();
+#endif
 
     if (!useWayland) {
         if (finalX < 0 - finalWidth) {
@@ -880,9 +882,17 @@ struct Size {
 extern "C" WINAPI Size get_window_size(HANDLE window) {
     // std::cerr << "get_window_size(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
-        Size size;
+        #ifdef WITH_WINE
         size.width = main_window_width;
         size.height = main_window_height;
+        #else
+        auto cookie = xcb_get_geometry(globalXcbConnection, main_window_handle);
+        auto reply = xcb_get_geometry_reply(globalXcbConnection, cookie, NULL);
+        Size size;
+        size.width = reply->width;
+        size.height = reply->height;
+        free(reply);
+        #endif
         return size;
     }
 
@@ -896,9 +906,17 @@ extern "C" WINAPI Size get_window_size(HANDLE window) {
 extern "C" WINAPI Size get_view_size(HANDLE window) {
     // std::cerr << "get_view_size(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
-        Size size;
+        #ifdef WITH_WINE
         size.width = main_window_width;
         size.height = main_window_height;
+        #else
+        auto cookie = xcb_get_geometry(globalXcbConnection, main_window_handle);
+        auto reply = xcb_get_geometry_reply(globalXcbConnection, cookie, NULL);
+        Size size;
+        size.width = reply->width;
+        size.height = reply->height;
+        free(reply);
+        #endif
         return size;
     }
 
@@ -912,9 +930,17 @@ extern "C" WINAPI Size get_view_size(HANDLE window) {
 extern "C" WINAPI Size get_window_position(HANDLE window) {
     // std::cerr << "get_window_position(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
-        Size size;
+        #ifdef WITH_WINE
         size.width = main_window_x;
         size.height = main_window_y;
+        #else
+        auto cookie = xcb_get_geometry(globalXcbConnection, main_window_handle);
+        auto reply = xcb_get_geometry_reply(globalXcbConnection, cookie, NULL);
+        Size size;
+        size.width = reply->x;
+        size.height = reply->y;
+        free(reply);
+        #endif
         return size;
     }
 
@@ -1269,6 +1295,40 @@ extern "C" WINAPI void set_window_frame_visible(HWND window, bool visible) {
         customWindow->updateThings();
     }, Qt::QueuedConnection);
 }
+
+#ifndef WITH_WINE
+struct NativeMonitor {
+    int X;
+    int Y;
+    int Width;
+    int Height;
+    int Scale;
+};
+
+struct NativeMonitors {
+    NativeMonitor* monitors;
+    int count;
+};
+
+extern "C" NativeMonitors get_monitors() {
+    NativeMonitors monitors;
+    auto screens = app->screens();
+    monitors.count = screens.size();
+    monitors.monitors = (NativeMonitor*)malloc(sizeof(NativeMonitor) * monitors.count);
+    for (int i = 0; i < monitors.count; i++) {
+        QScreen* screen = screens[i];
+        QRect geometry = screen->geometry();
+        monitors.monitors[i] = {
+            geometry.x(),
+            geometry.y(),
+            geometry.width(),
+            geometry.height(),
+            100
+        };
+    }
+    return monitors;
+}
+#endif
 
 static IUnityInterfaces* s_UnityInterfaces = NULL;
 static IUnityGraphics* s_Graphics = NULL;

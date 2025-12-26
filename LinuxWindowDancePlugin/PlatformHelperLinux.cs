@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
+using MultiWindow;
 using UnityEngine;
 
 namespace LinuxWindowDancePlugin;
@@ -21,17 +24,36 @@ public class PlatformHelperLinux : PlatformHelper
         );
     }
 
+    public int GetMonitorIndex(IEnumerable<(Monitor monitor, int index)> list, Vector2Int playerCenter)
+    {
+        var match = list.FirstOrDefault((x) => x.monitor.bounds.ContainsPoint(playerCenter));
+
+        return match == default ? 0 : match.index; 
+    }
+
     public override List<Monitor> GetMonitors()
     {
-        // TODO: Replace with real values
-        return [
-            new Monitor(new Rectangle() {
-                Left = 0,
-                Top = 0,
-                Right = 1920,
-                Bottom = 1080,
-            }, 1)
-        ];
+        var monitors = Native.GetMonitors().ToList().OrderBy(monitor => monitor.X).Select((monitor, index) => (monitor: monitor.ToMonitor(), index));
+        var playerPos = PlayerWindow.Instance.GetPosition();
+        var playerSize = PlayerWindow.Instance.GetSize();
+        var playerCenter = playerPos + (playerSize.ToVector2Int() / 2);
+
+        // "currentMonitorIndex" seems like the primary monitor.
+        currentMonitorIndex = GetMonitorIndex(monitors, playerCenter);
+
+        var primaryMonitor = monitors.ElementAt(currentMonitorIndex);
+        int primaryScale = primaryMonitor.monitor.scale;
+        monitors = monitors.Where((x) => x.monitor.scale == primaryScale);
+
+        if (RDC.windowMovement == WindowMovement.OneScreen)
+        {
+            currentMonitorIndex = 0;
+            return [primaryMonitor.monitor];
+        }
+
+        currentMonitorIndex = GetMonitorIndex(monitors, playerCenter);
+
+        return monitors.Select(x => x.monitor).ToList();
     }
 
     public Vector2Int GetBottomLeftDesktopPoint()

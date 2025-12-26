@@ -8,4 +8,7 @@ public class Native
 {
     [DllImport("multiwindow_unity", EntryPoint = "set_window_texture_size")]
     public static extern void SetWindowTextureSize(IntPtr window, int w, int h);
+
+    [DllImport("multiwindow_unity", EntryPoint = "get_monitors")]
+    public static extern NativeMonitors GetMonitors();
 }

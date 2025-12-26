@@ -1,5 +1,7 @@
 #include <string>
+
 #ifdef WITH_WINE
+
 #include <windef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +19,10 @@
 #undef WINAPI_FAMILY
 #undef __NT__
 #undef interface
+#include <QtWidgets>
+
 #else
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
@@ -27,8 +32,17 @@ typedef bool BOOL;
 typedef char* LPSTR;
 #define WINAPI
 #include "unity/IUnityGraphics.h"
+#include <GL/glew.h>
+#include <QtCore>
+#include <QtGui/QPainter>
+#include <QtGui/QImage>
+#include <QtGui/QScreen>
+#include <QtGui/QCloseEvent>
+#include <QtWidgets/QApplication>
+#include <QtWidgets/QMessageBox>
+#include <QtWidgets/QWidget>
 #endif
-#include <QtWidgets>
+
 #include <QDBusMessage>
 #include <QDBusConnection>
 #include <bitset>
@@ -38,6 +52,8 @@ typedef char* LPSTR;
 #include "multiwindow_unity.hpp"
 
 #define SAFE_RELEASE(a) if (a) { a->Release(); a = NULL; }
+#define SAFE_FREE(a) if (a) { free(a); a = NULL; }
+#define SAFE_DELETE(a) if (a) { delete a; a = NULL; }
 
 QString kwinFile = "/tmp/multiwindow_unity_kwin.js";
 void* MAIN_WINDOW = (void*)0x12345;
@@ -452,6 +468,33 @@ void CustomWindow::copyTexture() {
     ctx->Unmap(stagingTexture, 0);
     ctx->Release();
 }
+
+#else
+
+void CustomWindow::setTexture(GLuint textureId) {
+    this->glTextureId = textureId;
+}
+
+void CustomWindow::setTextureSize(int w, int h) {
+    this->qtImage = new QImage(w, h, QImage::Format_RGBA8888_Premultiplied);
+    SAFE_FREE(this->tempTexture);
+    tempTexture = malloc(w * h * 4);
+}
+
+void CustomWindow::copyTexture() {
+    glBindTexture(GL_TEXTURE_2D, this->glTextureId);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, tempTexture);
+    
+    int bytesPerLine = qtImage->bytesPerLine();
+    int height = qtImage->height();
+    uchar* startingBits = qtImage->bits();
+    uchar* source = (uchar*)tempTexture;
+    for (int i = 0; i < height; i++) {
+        int invertedY = (height - i - 1);
+        memcpy(startingBits + i * bytesPerLine, source + invertedY * bytesPerLine, bytesPerLine);
+    }
+}
+
 #endif
 
 void CustomWindow::_setX11Decorations(bool hasDecorations) {
@@ -619,7 +662,6 @@ void CustomWindow::updateThings() {
 void CustomWindow::paintEvent(QPaintEvent* paintEvent) {
     QPainter painter(this);
     if (!isVisible) return;
-#ifdef WITH_WINE
     if (this->qtImage == nullptr) {
         return;
     }
@@ -632,14 +674,10 @@ void CustomWindow::paintEvent(QPaintEvent* paintEvent) {
         this->targetWidth / scaling,
         this->targetHeight / scaling
     ), *this->qtImage, this->qtImage->rect());
-#endif
 }
 
 void CustomWindow::setIcon(QImage* image) {
-    if (iconIcon != nullptr) {
-        delete iconIcon;
-        iconIcon = nullptr;
-    }
+    SAFE_DELETE(iconIcon);
 
     if (image == nullptr) return;
 
@@ -657,9 +695,9 @@ void CustomWindow::closeEvent(QCloseEvent* closeEvent) {
 
 CustomWindow::~CustomWindow() {
 #ifdef WITH_WINE
-    if (this->qtImage != nullptr) {
-        delete this->qtImage;
-    }
+    SAFE_DELETE(this->qtImage);
+#else
+    SAFE_FREE(this->tempTexture);
 #endif
 
     setIcon(nullptr);
@@ -742,7 +780,7 @@ extern "C" WINAPI const char* set_window_title(HANDLE window, const char* title)
 }
 
 extern "C" WINAPI HANDLE __win32_get_hwnd(HANDLE window) {
-    std::cerr << "__win32_get_hwnd(" << std::hex << window << std::dec << ")" << std::endl;
+    // std::cerr << "__win32_get_hwnd(" << std::hex << window << std::dec << ")" << std::endl;
     return window;
 }
 
@@ -784,7 +822,7 @@ extern "C" WINAPI Size get_view_size(HANDLE window) {
 }
 
 extern "C" WINAPI Size get_window_position(HANDLE window) {
-    std::cerr << "get_window_position(" << std::hex << window << std::dec << ")" << std::endl;
+    // std::cerr << "get_window_position(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
         Size size;
         size.width = main_window_x;
@@ -920,7 +958,14 @@ extern "C" WINAPI bool is_window_focused(HWND window) {
     return customWindow->isActiveWindow();
 }
 
-extern "C" char* set_window_texture(HWND window, HWND texturePtr) {
+extern "C" char* set_window_texture(
+    HWND window,
+    #ifdef WITH_WINE
+    HWND texturePtr
+    #else
+    GLuint texturePtr
+    #endif
+) {
     std::cerr << "set_window_texture(" << std::hex << window << std::dec << ", " << std::hex << texturePtr << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
         return createString("");
@@ -930,9 +975,22 @@ extern "C" char* set_window_texture(HWND window, HWND texturePtr) {
     CustomWindow* customWindow = (CustomWindow*)window;
     #ifdef WITH_WINE
     customWindow->setTexture((ID3D11Resource*)texturePtr);
+    #else
+    customWindow->setTexture(texturePtr);
     #endif
     return createString("");
 }
+
+#ifndef WITH_WINE
+extern "C" void set_window_texture_size(
+    HWND window,
+    int w,
+    int h
+) {
+    CustomWindow* customWindow = (CustomWindow*)window;
+    customWindow->setTextureSize(w, h);
+}
+#endif
 
 extern "C" WINAPI FFIResult create_icon(void* buffer, int width) {
     std::cerr << "create_icon(" << width << " width)" << std::endl;
@@ -1091,9 +1149,7 @@ extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
 static void UNITY_INTERFACE_API render(int eventID) {
     // std::cerr << "render(" << eventID << ")" << std::endl;
     for (auto customWindow : allCustomWindows) {
-        #ifdef WITH_WINE
         customWindow->copyTexture();
-        #endif
         QMetaObject::invokeMethod(customWindow, qOverload<>(&QWidget::repaint), Qt::QueuedConnection);
     }
 }
@@ -1137,8 +1193,8 @@ static void UNITY_INTERFACE_API
     {
         case kUnityGfxDeviceEventInitialize:
         {
-            #ifdef WITH_WINE
             s_RendererType = s_Graphics->GetRenderer();
+#ifdef WITH_WINE
             if (s_RendererType != kUnityGfxRendererD3D11) {
                 std::cerr << "[ERROR] Only D3D11 is supported" << std::endl;
                 return;
@@ -1146,7 +1202,12 @@ static void UNITY_INTERFACE_API
             IUnityGraphicsD3D11* d3d = s_UnityInterfaces->Get<IUnityGraphicsD3D11>();
             if (d3d == nullptr) return;
             app->device = d3d->GetDevice();
-            #endif
+#else
+            if (s_RendererType != kUnityGfxRendererOpenGLCore) {
+                std::cerr << "[ERROR] Only OpenGL Core is supported" << std::endl;
+                return;
+            }
+#endif
             break;
         }
         case kUnityGfxDeviceEventShutdown:

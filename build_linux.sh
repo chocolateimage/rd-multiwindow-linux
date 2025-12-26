@@ -20,5 +20,5 @@ if [ $# -eq 2 ]; then
     fi
 fi
 
-g++ -o multiwindow_unity.so -fPIC -shared multiwindow_unity.cpp `pkg-config Qt6Widgets Qt6DBus xcb --libs --cflags` -Og $COMPILE_ARGUMENTS
+g++ -o multiwindow_unity.so -fPIC -shared multiwindow_unity.cpp `pkg-config Qt6Widgets Qt6DBus xcb glew --libs --cflags` -Og $COMPILE_ARGUMENTS
 mv multiwindow_unity.so "$1/Rhythm Doctor_Data/Plugins/multiwindow_unity.so"

@@ -29,8 +29,12 @@ public:
     D3D11_TEXTURE2D_DESC stagingDesc;
 
     D3D11_MAPPED_SUBRESOURCE mapped;
-    QImage* qtImage = nullptr;
+#else
+    GLuint glTextureId = -1;
+    void* tempTexture = nullptr;
 #endif
+
+    QImage* qtImage = nullptr;
 
     QPixmap iconPixmap;
     QIcon* iconIcon = nullptr;
@@ -40,7 +44,12 @@ public:
 #ifdef WITH_WINE
     void setTexture(ID3D11Resource* resource);
     void copyTexture();
+#else
+    void setTexture(GLuint textureId);
+    void setTextureSize(int w, int h);
+    void copyTexture();
 #endif
+
     void _setX11Decorations(bool hasDecorations);
     void setTargetMove(int x, int y);
     void setTargetSize(int w, int h);

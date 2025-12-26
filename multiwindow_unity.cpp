@@ -1,4 +1,7 @@
+#include <cstddef>
+#include <cstdlib>
 #include <string>
+#include <xcb/xproto.h>
 
 #ifdef WITH_WINE
 
@@ -57,7 +60,11 @@ typedef char* LPSTR;
 
 QString kwinFile = "/tmp/multiwindow_unity_kwin.js";
 void* MAIN_WINDOW = (void*)0x12345;
+#ifdef WITH_WINE
 HWND main_window_handle;
+#else
+xcb_window_t main_window_handle;
+#endif
 int main_window_x = 0;
 int main_window_y = 0;
 int main_window_width = 800;
@@ -72,6 +79,8 @@ QMap<QScreen*, QRect> screenGeometries;
 
 std::vector<CustomWindow*> allCustomWindows;
 std::vector<WId> waylandWindowOrder;
+
+xcb_connection_t* globalXcbConnection;
 
 std::string boolToStr(bool value) {
     return value ? "true" : "false";
@@ -297,6 +306,14 @@ void blockWithError(QString error) {
     }, Qt::BlockingQueuedConnection);
 }
 
+xcb_atom_t getAtom(xcb_connection_t *connection, const char* name) {
+    xcb_intern_atom_cookie_t cookie = xcb_intern_atom(connection, 0, strlen(name), name);
+    xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(connection, cookie, NULL);
+    xcb_atom_t atom = reply->atom;
+    free(reply);
+    return atom;
+}
+
 #ifdef WITH_WINE
 bool WINAPI CustomGetWindowRect(
     HWND   hWnd,
@@ -389,6 +406,59 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved
     }
 
     return TRUE;
+}
+#else
+void findMainWindowHandle() {
+    int currentPid = getpid();
+
+    xcb_connection_t* connection = xcb_connect(NULL, NULL);
+    globalXcbConnection = connection;
+    xcb_screen_iterator_t screens = xcb_setup_roots_iterator(xcb_get_setup(connection));
+    xcb_screen_t* screen = screens.data;
+    xcb_window_t root = screen->root;
+
+    xcb_atom_t clientListAtom = getAtom(connection, "_NET_CLIENT_LIST");
+    xcb_atom_t pidAtom = getAtom(connection, "_NET_WM_PID");
+
+    xcb_get_property_cookie_t cookie = xcb_get_property(
+        connection,
+        0,
+        root,
+        clientListAtom,
+        XCB_ATOM_WINDOW,
+        0,
+        1024
+    );
+
+    xcb_get_property_reply_t* reply = xcb_get_property_reply(connection, cookie, NULL);
+    int length = xcb_get_property_value_length(reply) / sizeof(xcb_window_t);
+
+    xcb_window_t* windows = (xcb_window_t*)xcb_get_property_value(reply);
+    for (int i = 0; i < length; i++) {
+        xcb_window_t window = windows[i];
+        xcb_get_property_cookie_t pidCookie = xcb_get_property(
+            connection,
+            0,
+            window,
+            pidAtom,
+            XCB_ATOM_CARDINAL,
+            0,
+            1
+        );
+        xcb_get_property_reply_t *pidReply = xcb_get_property_reply(connection, pidCookie, NULL);
+        if (pidReply == nullptr) continue;
+
+        if (xcb_get_property_value_length(pidReply) != 4) continue;
+
+        int pid = *(int*)xcb_get_property_value(pidReply);
+        free(pidReply);
+        if (pid == currentPid) {
+            main_window_handle = window;
+            break;
+        }
+    }
+
+    free(reply);
 }
 #endif
 
@@ -513,21 +583,18 @@ void CustomWindow::_setX11Decorations(bool hasDecorations) {
         .decorations = hasDecorations
     };
 
-    xcb_intern_atom_cookie_t cookie = xcb_intern_atom(connection, 0, strlen("_MOTIF_WM_HINTS"), "_MOTIF_WM_HINTS");
-    xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(connection, cookie, NULL);
+    xcb_atom_t atom = getAtom(connection, "_MOTIF_WM_HINTS");
 
     xcb_change_property(
         connection,
         XCB_PROP_MODE_REPLACE,
         window()->winId(),
-        reply->atom,
-        reply->atom,
+        atom,
+        atom,
         32,
         5,
         &hints
     );
-
-    free(reply);
 }
 
 void CustomWindow::setTargetMove(int x, int y) {
@@ -749,8 +816,10 @@ void setMainWindowGeometry(int x, int y, int w, int h) {
     if (w != MAIN_WINDOW_GEOMETRY_SKIP) main_window_width = w;
     if (h != MAIN_WINDOW_GEOMETRY_SKIP) main_window_height = h;
 
+    bool invisible = x < -1500 || y < -1500;
+
 #ifdef WITH_WINE
-    if (x < -1500 || y < -1500) {
+    if (invisible) {
         SetWindowLongPtr(main_window_handle, GWL_EXSTYLE, GetWindowLongPtr(main_window_handle, GWL_EXSTYLE) | WS_EX_LAYERED);
         SetLayeredWindowAttributes(main_window_handle, 0, 0, LWA_ALPHA);
         return;
@@ -758,6 +827,23 @@ void setMainWindowGeometry(int x, int y, int w, int h) {
 
     SetWindowLongPtr(main_window_handle, GWL_EXSTYLE, GetWindowLongPtr(main_window_handle, GWL_EXSTYLE) & ~WS_EX_LAYERED);
     SetWindowPos(main_window_handle, NULL, main_window_x, main_window_y, main_window_width, main_window_height, 0);
+#else
+    uint32_t opacity = invisible ? 0x00000000 : 0xFFFFFFFF;
+
+    xcb_atom_t atom = getAtom(globalXcbConnection, "_NET_WM_WINDOW_OPACITY");
+
+    xcb_change_property(
+        globalXcbConnection,
+        XCB_PROP_MODE_REPLACE,
+        main_window_handle,
+        atom,
+        XCB_ATOM_CARDINAL,
+        32,
+        1,
+        &opacity
+    );
+
+    xcb_flush(globalXcbConnection);
 #endif
 }
 
@@ -1234,9 +1320,7 @@ static void UNITY_INTERFACE_API
 }
 
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces* unityInterfaces) {
-    #ifdef WITH_WINE
     findMainWindowHandle();
-    #endif
     createApplication();
     while (!appReady) usleep(100);
 

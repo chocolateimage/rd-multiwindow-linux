@@ -1,7 +1,3 @@
-#include <cstddef>
-#include <cstdlib>
-#include <string>
-
 #ifdef WITH_WINE
 
 #include <windef.h>

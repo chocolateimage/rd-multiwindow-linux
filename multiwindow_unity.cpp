@@ -1,7 +1,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <string>
-#include <xcb/xproto.h>
 
 #ifdef WITH_WINE
 

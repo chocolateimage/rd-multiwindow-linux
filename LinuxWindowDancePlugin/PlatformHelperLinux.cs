@@ -15,7 +15,10 @@ public class PlatformHelperLinux : PlatformHelper
     public override Vector2Int GetWindowDanceResolution()
     {
         windowDanceResolutionRect = GetMonitorsRect(Monitors, onlyHorizontal: false);
-        return new Vector2Int(1920, 1080); // TODO: Replace with real values
+        return new Vector2Int(
+            windowDanceResolutionRect.Right - windowDanceResolutionRect.Left,
+            windowDanceResolutionRect.Bottom - windowDanceResolutionRect.Top
+        );
     }
 
     public override List<Monitor> GetMonitors()

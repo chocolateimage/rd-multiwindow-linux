@@ -8,6 +8,6 @@ public class UnityPlayerWindowLinux : UnityPlayerWindow
 
     public override bool IsInWindowDanceRect()
     {
-        throw new System.NotImplementedException();
+        return true;
     }
 }

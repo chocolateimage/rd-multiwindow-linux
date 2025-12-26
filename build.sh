@@ -19,6 +19,19 @@ if [ -f "$1/Rhythm Doctor.exe" ]; then
 elif [ -f "$1/Rhythm Doctor" ]; then
     echo "Linux version detected"
 
+    if [ ! -f "$1/run_bepinex.sh" ]; then
+        echo "ERROR: BepInEx not installed."
+        exit 1
+    fi
+
+    if [ -f "LinuxWindowDancePlugin/bin/Debug/netstandard2.1/LinuxWindowDancePlugin.dll" ]; then
+        echo "Local plugin detected, not downloading."
+    else
+        echo "Downloading plugin..."
+        mkdir -p "$1/BepInEx/plugins"
+        curl -Lso "$1/BepInEx/plugins/LinuxWindowDancePlugin.dll" "https://github.com/chocolateimage/rd-multiwindow-linux/releases/download/bepinex/LinuxWindowDancePlugin.dll"
+        echo "Finished downloading. Building..."
+    fi
 else
     echo "ERROR: First argument must be a path to Rhythm Doctor."
     exit 1
@@ -27,6 +40,7 @@ fi
 if [ $# -eq 2 ]; then
     if [[ "$2" == "--wayland" ]]; then
         COMPILE_ARGUMENTS="$COMPILE_ARGUMENTS -DKWIN_WAYLAND "
+        echo "Wayland enabled"
     fi
 fi
 

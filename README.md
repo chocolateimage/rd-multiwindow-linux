@@ -24,48 +24,38 @@ You can either choose from these versions:
 The native Linux version works with BepInEx 5. BepInEx is a mod loader for games. If you do not want to use BepInEx, use the [Proton version](#proton).
 
 1. You'll need BepInEx 5 installed. If you do not have it, follow the [install guide](https://docs.bepinex.dev/articles/user_guide/installation/index.html?tabs=tabid-nix), then also follow the [Steam guide](https://docs.bepinex.dev/articles/advanced/steam_interop.html).
-2. Download the BepInEx plugin [from this release](https://github.com/chocolateimage/rd-multiwindow-linux/releases/latest), and place it under "Rhythm Doctor/BepInEx/plugins/", so that it will look like this:
 
-    ```text
-    Rhythm Doctor/
-        BepInEx/
-            plugins/
-                LinuxWindowDancePlugin.dll <--- HERE
-        run_bepinex.sh
-        Rhythm Doctor
-    ```
-
-3. Install these packages:
+2. Install these packages:
 
     ```bash
     # Debian/Ubuntu based
-    sudo apt install pkg-config qt6-base-dev libxcb1-dev git
+    sudo apt install pkg-config qt6-base-dev libxcb1-dev git curl
 
     # Arch
-    sudo pacman -S --needed pkgconf qt6-base libxcb git
+    sudo pacman -S --needed pkgconf qt6-base libxcb git curl
     ```
 
-4. Clone this project:
+3. Clone this project:
 
     ```bash
     git clone https://github.com/chocolateimage/rd-multiwindow-linux.git
     cd rd-multiwindow-linux
     ```
 
-5. Build:
+4. Build (will also download the BepInEx plugin):
 
     ```bash
     ./build.sh "/path/to/steamapps/common/Rhythm Doctor"
 
-    # OR this if you want experimental Wayland support (only KWin is supported, else it falls back to X11). This allows real offscreen windows.
+    # OR this if you want Wayland support (only KWin is supported, else it falls back to X11). This allows real offscreen windows.
 
     ./build.sh "/path/to/steamapps/common/Rhythm Doctor" --wayland
     ```
 
-6. In the Steam compatibility settings, force the runtime to "Legacy runtime 1.0"
+5. In the Steam compatibility settings, force the runtime to "Legacy runtime 1.0"
     ![Legacy runtime forced](https://party.playlook.de/public/steam-rd-legacy.png)
 
-7. Open the game, go to the settings and select the window dance option in the accessibility tab. Have fun!
+6. Open the game, go to the settings and select the window dance option in the accessibility tab. Have fun!
 
 If you found this plugin useful or cool, consider starring the GitHub repo!
 
@@ -100,7 +90,7 @@ To patch the game:
 ```bash
 ./build.sh "/path/to/steamapps/common/Rhythm Doctor"
 
-# OR this if you want experimental Wayland support (only KWin is supported, else it falls back to X11). This allows real offscreen windows.
+# OR this if you want Wayland support (only KWin is supported, else it falls back to X11). This allows real offscreen windows.
 
 ./build.sh "/path/to/steamapps/common/Rhythm Doctor" --wayland
 ```

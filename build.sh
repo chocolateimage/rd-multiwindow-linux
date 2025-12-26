@@ -12,11 +12,11 @@ if [ ! -f "$1/Rhythm Doctor.exe" ]; then
     exit 1
 fi
 
-COMPILE_ARGUMENTS=""
+COMPILE_ARGUMENTS=" -DWITH_WINE "
 
 if [ $# -eq 2 ]; then
     if [[ "$2" == "--wayland" ]]; then
-        COMPILE_ARGUMENTS=" -DKWIN_WAYLAND "
+        COMPILE_ARGUMENTS="$COMPILE_ARGUMENTS -DKWIN_WAYLAND "
     fi
 fi
 

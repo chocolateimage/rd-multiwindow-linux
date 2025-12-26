@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>LinuxWindowDancePlugin</AssemblyName>
+    <Product>Linux Window dance</Product>
+    <Version>1.0.0</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <RestoreAdditionalProjectSources>
+      https://api.nuget.org/v3/index.json;
+      https://nuget.bepinex.dev/v3/index.json;
+      https://nuget.samboy.dev/v3/index.json
+    </RestoreAdditionalProjectSources>
+    <RootNamespace>LinuxWindowDancePlugin</RootNamespace>
+    <MSBuildWarningsAsMessages>
+      $(MSBuildWarningsAsMessages);MSB3277
+    </MSBuildWarningsAsMessages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
+    <PackageReference Include="BepInEx.Core" Version="5.*" />
+    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*" />
+    <PackageReference Include="Nitrox.Discovery.MSBuild" Version="0.1.1">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="UnityEngine.Modules" Version="2022.3.62" IncludeAssets="compile" />
+    <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.3" PrivateAssets="all" />
+  </ItemGroup>
+  
+  <ItemGroup Condition="'$(TargetFramework.TrimEnd(`0123456789`))' == 'net'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.2" PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="FindGameAndIncludeReferences" BeforeTargets="ResolveAssemblyReferences" Condition="'$(_NitroxDiscovery_TaskAssembly)' != ''">
+    <DiscoverGame GameName="Rhythm Doctor">
+        <Output TaskParameter="GamePath" PropertyName="GameDir" />
+    </DiscoverGame>
+    <Error Condition="'$(GameDir)' == ''" Text="Failed to find the game 'Rhythm Doctor' on your machine" />
+
+    <!-- Load any references to game DLLs here -->
+    <ItemGroup>
+        <Reference Include="AssemblyCSharp" Publicize="true">
+            <HintPath>$(GameDir)/Rhythm Doctor_Data/Managed/Assembly-CSharp.dll</HintPath>
+        </Reference>
+        <Reference Include="RDTools" Publicize="true">
+          <HintPath>$(GameDir)/Rhythm Doctor_Data/Managed/RDTools.dll</HintPath>
+        </Reference>
+        <Reference Include="MultiWindow" Publicize="true">
+          <HintPath>$(GameDir)/Rhythm Doctor_Data/Managed/MultiWindow.dll</HintPath>
+        </Reference>
+    </ItemGroup>
+  </Target>
+</Project>

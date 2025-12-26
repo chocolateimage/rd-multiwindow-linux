@@ -20,6 +20,7 @@ public:
     int cutoffX = 0;
     int cutoffY = 0;
 
+#ifdef WITH_WINE
     ID3D11Resource* resource = nullptr;
     ID3D11Texture2D* texture = nullptr;
     D3D11_TEXTURE2D_DESC desc;
@@ -29,14 +30,17 @@ public:
 
     D3D11_MAPPED_SUBRESOURCE mapped;
     QImage* qtImage = nullptr;
-    QMutex qtImageMutex;
+#endif
 
     QPixmap iconPixmap;
     QIcon* iconIcon = nullptr;
 
     CustomWindow();
+
+#ifdef WITH_WINE
     void setTexture(ID3D11Resource* resource);
     void copyTexture();
+#endif
     void _setX11Decorations(bool hasDecorations);
     void setTargetMove(int x, int y);
     void setTargetSize(int w, int h);

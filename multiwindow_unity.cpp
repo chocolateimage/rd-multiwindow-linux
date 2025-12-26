@@ -1,3 +1,5 @@
+#include <string>
+#ifdef WITH_WINE
 #include <windef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +17,17 @@
 #undef WINAPI_FAMILY
 #undef __NT__
 #undef interface
+#else
+#include <stdio.h>
+#include <stdlib.h>
+#include <iostream>
+typedef void* HANDLE;
+typedef void* HWND;
+typedef bool BOOL;
+typedef char* LPSTR;
+#define WINAPI
+#include "unity/IUnityGraphics.h"
+#endif
 #include <QtWidgets>
 #include <QDBusMessage>
 #include <QDBusConnection>
@@ -48,11 +61,23 @@ std::string boolToStr(bool value) {
     return value ? "true" : "false";
 }
 
+char* createString(const char* string) {
+#ifdef WITH_WINE
+    return (char*)string;
+#else
+    char* address = (char*)malloc(strlen(string) + 1);
+    strcpy(address, string);
+    return address;
+#endif
+}
+
 class CustomApplication : public QApplication {
 public:
+#ifdef WITH_WINE
     ID3D11Device *device = nullptr;
     ID3D11DeviceContext *context = nullptr;
-    
+#endif
+
     CustomApplication(int &argc, char** argv) : QApplication(argc, argv) {
         this->setQuitOnLastWindowClosed(false);
     }
@@ -249,6 +274,7 @@ workspace.windowAdded.connect((win) => {
 
 CustomApplication* app;
 
+#ifdef WITH_WINE
 bool WINAPI CustomGetWindowRect(
     HWND   hWnd,
     LPRECT lpRect
@@ -281,6 +307,7 @@ void hookIntoDLL() {
         std::cerr << "Error hooking GetWindowRect! Incorrect return values." << std::endl;
     }
 }
+#endif
 
 void checkForKWinWayland() {
     if (qgetenv("XDG_SESSION_DESKTOP").toLower() != "kde") {
@@ -301,7 +328,9 @@ void createApplication() {
     qInfo() << "Compiled with Wayland capabilities. Checking if it is supported.";
     checkForKWinWayland();
 #endif
+#ifdef WITH_WINE
     hookIntoDLL();
+#endif
 
     qInfo() << "Using KWin Wayland:" << useWayland;
     
@@ -316,6 +345,7 @@ void createApplication() {
     }).detach();
 }
 
+#ifdef WITH_WINE
 BOOL CALLBACK findMainWindowHandleCallback(HWND hwnd, LPARAM lParam) {
     RECT rect;
     GetWindowRect(hwnd, &rect);
@@ -331,13 +361,13 @@ void findMainWindowHandle() {
 }
 
 extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved) {
-    // fprintf(stderr, "[multiwindow_unity] DllMain();\n");
     if (reason == DLL_PROCESS_ATTACH) {
-        // createApplication();
+        // fprintf(stderr, "[multiwindow_unity] DllMain();\n");
     }
 
     return TRUE;
 }
+#endif
 
 struct MotifWmHints {
     uint32_t flags;
@@ -369,6 +399,7 @@ CustomWindow::CustomWindow() {
     // testLabel->show();
 }
 
+#ifdef WITH_WINE
 void CustomWindow::setTexture(ID3D11Resource* resource) {
     if (this->qtImage != nullptr) {
         delete this->qtImage;
@@ -421,6 +452,7 @@ void CustomWindow::copyTexture() {
     ctx->Unmap(stagingTexture, 0);
     ctx->Release();
 }
+#endif
 
 void CustomWindow::_setX11Decorations(bool hasDecorations) {
     auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
@@ -587,6 +619,7 @@ void CustomWindow::updateThings() {
 void CustomWindow::paintEvent(QPaintEvent* paintEvent) {
     QPainter painter(this);
     if (!isVisible) return;
+#ifdef WITH_WINE
     if (this->qtImage == nullptr) {
         return;
     }
@@ -599,6 +632,7 @@ void CustomWindow::paintEvent(QPaintEvent* paintEvent) {
         this->targetWidth / scaling,
         this->targetHeight / scaling
     ), *this->qtImage, this->qtImage->rect());
+#endif
 }
 
 void CustomWindow::setIcon(QImage* image) {
@@ -622,9 +656,11 @@ void CustomWindow::closeEvent(QCloseEvent* closeEvent) {
 }
 
 CustomWindow::~CustomWindow() {
+#ifdef WITH_WINE
     if (this->qtImage != nullptr) {
         delete this->qtImage;
     }
+#endif
 
     setIcon(nullptr);
 
@@ -668,6 +704,7 @@ void setMainWindowGeometry(int x, int y, int w, int h) {
     if (w != MAIN_WINDOW_GEOMETRY_SKIP) main_window_width = w;
     if (h != MAIN_WINDOW_GEOMETRY_SKIP) main_window_height = h;
 
+#ifdef WITH_WINE
     if (x < -1500 || y < -1500) {
         SetWindowLongPtr(main_window_handle, GWL_EXSTYLE, GetWindowLongPtr(main_window_handle, GWL_EXSTYLE) | WS_EX_LAYERED);
         SetLayeredWindowAttributes(main_window_handle, 0, 0, LWA_ALPHA);
@@ -676,6 +713,7 @@ void setMainWindowGeometry(int x, int y, int w, int h) {
 
     SetWindowLongPtr(main_window_handle, GWL_EXSTYLE, GetWindowLongPtr(main_window_handle, GWL_EXSTYLE) & ~WS_EX_LAYERED);
     SetWindowPos(main_window_handle, NULL, main_window_x, main_window_y, main_window_width, main_window_height, 0);
+#endif
 }
 
 extern "C" WINAPI HANDLE get_main_window() {
@@ -683,17 +721,15 @@ extern "C" WINAPI HANDLE get_main_window() {
     return MAIN_WINDOW;
 }
 
-const char *unused = "Unused";
-
 extern "C" WINAPI const char* refresh_main_window_ptr() {
     std::cerr << "refresh_main_window_ptr()" << std::endl;
-    return unused;
+    return createString("");
 }
 
 extern "C" WINAPI const char* set_window_title(HANDLE window, const char* title) {
     std::cerr << "set_window_title(" << std::hex << window << std::dec << ", " << title << ")" << std::endl;
     if (window == MAIN_WINDOW) {
-        return unused;
+        return createString("");
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
@@ -702,11 +738,11 @@ extern "C" WINAPI const char* set_window_title(HANDLE window, const char* title)
         customWindow->updateThings();
     }, Qt::QueuedConnection);
 
-    return unused;
+    return createString("");
 }
 
 extern "C" WINAPI HANDLE __win32_get_hwnd(HANDLE window) {
-    // std::cerr << "__win32_get_hwnd(" << std::hex << window << std::dec << ")" << std::endl;
+    std::cerr << "__win32_get_hwnd(" << std::hex << window << std::dec << ")" << std::endl;
     return window;
 }
 
@@ -782,7 +818,7 @@ extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, in
     if (window == MAIN_WINDOW) {
         std::cerr << "move_window(" << std::hex << window << std::dec << ", " << x << ", " << y << ", " << w << ", " << h << ")" << std::endl;
         setMainWindowGeometry(x, y, w, h);
-        return "";
+        return createString("");
     }
     
     CustomWindow* customWindow = (CustomWindow*)window;
@@ -794,16 +830,16 @@ extern "C" WINAPI const char* move_window(HANDLE window, int x, int y, int w, in
     QMetaObject::invokeMethod(customWindow, [customWindow]() {
         customWindow->updateThings();
     }, Qt::QueuedConnection);
-    return "";
+    return createString("");
 }
 
 extern "C" WINAPI const char* move_window_to_top(HANDLE window) {
     std::cerr << "move_window_to_top(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
-        return "";
+        return createString("");
     }
 
-    return "";
+    return createString("");
 }
 
 extern "C" WINAPI void set_window_size(HANDLE window, int w, int h) {
@@ -862,32 +898,40 @@ extern "C" WINAPI FFIResult new_window(
 extern "C" WINAPI const char* focus_window(HWND window) {
     std::cerr << "focus_window(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
+        #ifdef WITH_WINE
         SetForegroundWindow(main_window_handle);
         SetActiveWindow(main_window_handle);
+        #endif
     }
-    return "";
+    return createString("");
 }
 
 extern "C" WINAPI bool is_window_focused(HWND window) {
     // std::cerr << "is_window_focused(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
+#ifdef WITH_WINE
         return GetActiveWindow() == main_window_handle;
+#else
+        return true;
+#endif
     }
 
     CustomWindow* customWindow = (CustomWindow*)window;
     return customWindow->isActiveWindow();
 }
 
-extern "C" WINAPI const char* set_window_texture(HWND window, HWND texturePtr) {
+extern "C" char* set_window_texture(HWND window, HWND texturePtr) {
     std::cerr << "set_window_texture(" << std::hex << window << std::dec << ", " << std::hex << texturePtr << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
-        return "";
+        return createString("");
     }
 
     
     CustomWindow* customWindow = (CustomWindow*)window;
+    #ifdef WITH_WINE
     customWindow->setTexture((ID3D11Resource*)texturePtr);
-    return "";
+    #endif
+    return createString("");
 }
 
 extern "C" WINAPI FFIResult create_icon(void* buffer, int width) {
@@ -918,12 +962,12 @@ extern "C" WINAPI void set_window_icon(HWND window, HWND icon) {
 
 extern "C" WINAPI const char* enable_input(HWND window) {
     std::cerr << "enable_input(" << std::hex << window << std::dec << ")" << std::endl;
-    return "";
+    return createString("");
 }
 
 extern "C" WINAPI const char* disable_inptut(HWND window) {
     std::cerr << "disable_inptut(" << std::hex << window << std::dec << ")" << std::endl;
-    return "";
+    return createString("");
 }
 
 struct SamplerConfig {
@@ -932,7 +976,7 @@ struct SamplerConfig {
 
 extern "C" WINAPI const char* set_window_sampler_config(HWND window, SamplerConfig config) {
     std::cerr << "set_window_sampler_config(" << std::hex << window << std::dec << ")" << std::endl;
-    return "";
+    return createString("");
 }
 
 struct KeyDownData {
@@ -979,27 +1023,27 @@ extern "C" WINAPI void present_window(HWND window) {
 extern "C" WINAPI const char* show_window(HWND window) {
     std::cerr << "show_window(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
-        return "";
+        return createString("");
     }
     CustomWindow* customWindow = (CustomWindow*)window;
     QMetaObject::invokeMethod(app, [customWindow]() {
         customWindow->targetOpacity = 1;
         customWindow->updateThings();
     }, Qt::QueuedConnection);
-    return "";
+    return createString("");
 }
 
 extern "C" WINAPI const char* hide_window(HWND window) {
     std::cerr << "hide_window(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
-        return "";
+        return createString("");
     }
     CustomWindow* customWindow = (CustomWindow*)window;
     QMetaObject::invokeMethod(app, [customWindow]() {
         customWindow->targetOpacity = 0;
         customWindow->updateThings();
     }, Qt::QueuedConnection);
-    return "";
+    return createString("");
 }
 
 void arrangeWindowsX11(HWND* windows, int count) {
@@ -1044,10 +1088,12 @@ extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
     }
 }
 
-void __stdcall render(int eventID) {
+static void UNITY_INTERFACE_API render(int eventID) {
     // std::cerr << "render(" << eventID << ")" << std::endl;
     for (auto customWindow : allCustomWindows) {
+        #ifdef WITH_WINE
         customWindow->copyTexture();
+        #endif
         QMetaObject::invokeMethod(customWindow, qOverload<>(&QWidget::repaint), Qt::QueuedConnection);
     }
 }
@@ -1091,6 +1137,7 @@ static void UNITY_INTERFACE_API
     {
         case kUnityGfxDeviceEventInitialize:
         {
+            #ifdef WITH_WINE
             s_RendererType = s_Graphics->GetRenderer();
             if (s_RendererType != kUnityGfxRendererD3D11) {
                 std::cerr << "[ERROR] Only D3D11 is supported" << std::endl;
@@ -1099,6 +1146,7 @@ static void UNITY_INTERFACE_API
             IUnityGraphicsD3D11* d3d = s_UnityInterfaces->Get<IUnityGraphicsD3D11>();
             if (d3d == nullptr) return;
             app->device = d3d->GetDevice();
+            #endif
             break;
         }
         case kUnityGfxDeviceEventShutdown:
@@ -1118,7 +1166,9 @@ static void UNITY_INTERFACE_API
 }
 
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces* unityInterfaces) {
+    #ifdef WITH_WINE
     findMainWindowHandle();
+    #endif
     createApplication();
     while (!appReady) usleep(100);
 
@@ -1132,6 +1182,7 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnit
     OnGraphicsDeviceEvent(kUnityGfxDeviceEventInitialize);
 }
 
+#ifdef WITH_WINE
 bool WINAPI CustomGetWindowRect(
     HWND   hWnd,
     LPRECT lpRect
@@ -1168,3 +1219,4 @@ bool WINAPI CustomGetWindowRect(
     lpRect->bottom = customWindow->targetY + customWindow->targetHeight;
     return true;
 }
+#endif

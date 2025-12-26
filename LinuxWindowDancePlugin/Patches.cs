@@ -121,4 +121,12 @@ public class Patches
         __result.name = name;
         return false;
     }
+
+    [HarmonyPatch(typeof(scrVfxControl), "CheckForWindowDanceChanges")]
+    [HarmonyPrefix]
+    public static bool CheckForWindowDanceChanges()
+    {
+        WindowChoreographer.playerWindow.Show(true);
+        return true;
+    }
 }

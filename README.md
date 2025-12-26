@@ -69,10 +69,10 @@ To build, you need these packages:
 
 ```bash
 # Debian/Ubuntu based
-sudo apt install libwine-dev pkg-config qt6-base-dev libxcb1-dev git
+sudo apt install libwine-dev pkg-config qt6-base-dev libxcb1-dev libglew-dev git
 
 # Arch
-sudo pacman -S --needed wine-staging pkgconf qt6-base libxcb git
+sudo pacman -S --needed wine-staging pkgconf qt6-base libxcb glew git
 ```
 
 Clone this project:

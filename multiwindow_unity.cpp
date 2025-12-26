@@ -882,13 +882,13 @@ struct Size {
 extern "C" WINAPI Size get_window_size(HANDLE window) {
     // std::cerr << "get_window_size(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
+        Size size;
         #ifdef WITH_WINE
         size.width = main_window_width;
         size.height = main_window_height;
         #else
         auto cookie = xcb_get_geometry(globalXcbConnection, main_window_handle);
         auto reply = xcb_get_geometry_reply(globalXcbConnection, cookie, NULL);
-        Size size;
         size.width = reply->width;
         size.height = reply->height;
         free(reply);
@@ -906,13 +906,13 @@ extern "C" WINAPI Size get_window_size(HANDLE window) {
 extern "C" WINAPI Size get_view_size(HANDLE window) {
     // std::cerr << "get_view_size(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
+        Size size;
         #ifdef WITH_WINE
         size.width = main_window_width;
         size.height = main_window_height;
         #else
         auto cookie = xcb_get_geometry(globalXcbConnection, main_window_handle);
         auto reply = xcb_get_geometry_reply(globalXcbConnection, cookie, NULL);
-        Size size;
         size.width = reply->width;
         size.height = reply->height;
         free(reply);
@@ -930,13 +930,13 @@ extern "C" WINAPI Size get_view_size(HANDLE window) {
 extern "C" WINAPI Size get_window_position(HANDLE window) {
     // std::cerr << "get_window_position(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
+        Size size;
         #ifdef WITH_WINE
         size.width = main_window_x;
         size.height = main_window_y;
         #else
         auto cookie = xcb_get_geometry(globalXcbConnection, main_window_handle);
         auto reply = xcb_get_geometry_reply(globalXcbConnection, cookie, NULL);
-        Size size;
         size.width = reply->x;
         size.height = reply->y;
         free(reply);

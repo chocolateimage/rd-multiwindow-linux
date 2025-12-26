@@ -63,9 +63,7 @@ public class Patches
         ref System.Collections.IEnumerator __result
     )
     {
-        Plugin.Logger.LogInfo("Setting up real window choreographer");
         __result = RealWindowChoreographerSetupCoroutine(dancerCount, __instance);
-        Plugin.Logger.LogInfo("Setting up real window choreographer2");
         return false;
     }
 
@@ -74,24 +72,24 @@ public class Patches
         RealWindowChoreographer instance
     )
     {
-        Plugin.Logger.LogInfo($"Adding {dancerCount} dancers");
+        Plugin.Logger.LogDebug($"Adding {dancerCount} window dancer(s)");
         instance.dancers = new WindowDancer[dancerCount];
         for (int i = 0; i < dancerCount; i++)
         {
-            Plugin.Logger.LogInfo($"Adding window {i}");
+            Plugin.Logger.LogDebug($"Adding window {i}");
             Window window = (i == 0 && instance.mainWindowIsDancer) ? new UnityPlayerWindowLinux(i, instance) : new CustomWindowLinux(i, instance, transparent: true);
-            Plugin.Logger.LogInfo($"Created class");
+            Plugin.Logger.LogDebug($"Created class");
             if (window == null)
             {
-                Plugin.Logger.LogInfo($"Window {i} was not initialized, it's null");
+                Plugin.Logger.LogError($"Window {i} was not initialized, it's null");
             }
-            Plugin.Logger.LogInfo($"Creating window dancer");
+            Plugin.Logger.LogDebug($"Creating window dancer");
             instance.dancers[i] = new WindowDancer(window, instance);
-            Plugin.Logger.LogInfo($"OK with this window");
+            Plugin.Logger.LogDebug($"Window was created");
         }
-        Plugin.Logger.LogInfo("Yielding");
+        Plugin.Logger.LogDebug("Minimizing if fullscreen...");
         yield return instance.MinimizeIfFullscreen();
-        Plugin.Logger.LogInfo("OK");
+        Plugin.Logger.LogDebug("Setting up rest...");
         if (!instance.mainWindowIsDancer)
         {
             if (!instance.editorMode)
@@ -110,7 +108,7 @@ public class Patches
             instance.game.StartCoroutine(instance.CustomWindowLoop());
         }
         instance.setup = true;
-        Plugin.Logger.LogInfo("Set up");
+        Plugin.Logger.LogInfo("Window choreographer was set up");
     }
 
     [HarmonyPatch(typeof(scrVfxControl), "CreateRenderTexture", [typeof(Vector2Int), typeof(string), typeof(int)])]

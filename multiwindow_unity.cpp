@@ -290,6 +290,13 @@ workspace.windowAdded.connect((win) => {
 
 CustomApplication* app;
 
+void blockWithError(QString error) {
+    qCritical() << "[ERROR]" << error;
+    QMetaObject::invokeMethod(app, [error]() {
+        QMessageBox::critical(nullptr, "RD Window Dance", error);
+    }, Qt::BlockingQueuedConnection);
+}
+
 #ifdef WITH_WINE
 bool WINAPI CustomGetWindowRect(
     HWND   hWnd,
@@ -1196,7 +1203,7 @@ static void UNITY_INTERFACE_API
             s_RendererType = s_Graphics->GetRenderer();
 #ifdef WITH_WINE
             if (s_RendererType != kUnityGfxRendererD3D11) {
-                std::cerr << "[ERROR] Only D3D11 is supported" << std::endl;
+                blockWithError("Only D3D11 is supported.");
                 return;
             }
             IUnityGraphicsD3D11* d3d = s_UnityInterfaces->Get<IUnityGraphicsD3D11>();
@@ -1204,7 +1211,7 @@ static void UNITY_INTERFACE_API
             app->device = d3d->GetDevice();
 #else
             if (s_RendererType != kUnityGfxRendererOpenGLCore) {
-                std::cerr << "[ERROR] Only OpenGL Core is supported" << std::endl;
+                blockWithError("Only OpenGL Core is supported.");
                 return;
             }
 #endif

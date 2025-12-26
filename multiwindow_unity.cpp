@@ -36,6 +36,7 @@ typedef char* LPSTR;
 #include <QtGui/QImage>
 #include <QtGui/QScreen>
 #include <QtGui/QCloseEvent>
+#include <QtGui/QIcon>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QWidget>
@@ -570,18 +571,15 @@ void CustomWindow::copyTexture() {
 #endif
 
 void CustomWindow::_setX11Decorations(bool hasDecorations) {
-    auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
-    auto connection = x11Application->connection();
-
     MotifWmHints hints = {
         .flags = 2,
         .decorations = hasDecorations
     };
 
-    xcb_atom_t atom = getAtom(connection, "_MOTIF_WM_HINTS");
+    xcb_atom_t atom = getAtom(globalXcbConnection, "_MOTIF_WM_HINTS");
 
     xcb_change_property(
-        connection,
+        globalXcbConnection,
         XCB_PROP_MODE_REPLACE,
         window()->winId(),
         atom,
@@ -590,6 +588,8 @@ void CustomWindow::_setX11Decorations(bool hasDecorations) {
         5,
         &hints
     );
+
+    xcb_flush(globalXcbConnection);
 }
 
 void CustomWindow::setTargetMove(int x, int y) {
@@ -752,7 +752,7 @@ void CustomWindow::setIcon(QImage* image) {
 
     if (image == nullptr) return;
 
-    iconPixmap = QPixmap::fromImage(image->flipped());
+    iconPixmap = QPixmap::fromImage(*image);
     iconIcon = new QIcon(iconPixmap);
 
     this->setWindowIcon(*iconIcon);
@@ -1108,7 +1108,15 @@ extern "C" void set_window_texture_size(
 
 extern "C" WINAPI FFIResult create_icon(void* buffer, int width) {
     std::cerr << "create_icon(" << width << " width)" << std::endl;
-    auto image = new QImage((uchar*)buffer, width, width, width * 4, QImage::Format_ARGB32);
+    auto image = new QImage(width, width, QImage::Format_ARGB32);
+    int bytesPerLine = image->bytesPerLine();
+    uchar* startingBits = image->bits();
+
+    for (int i = 0; i < width; i++) {
+        int invertedY = (width - i - 1);
+        memcpy(startingBits + i * bytesPerLine, (char*)buffer + invertedY * bytesPerLine, bytesPerLine);
+    }
+
     FFIResult result;
     result.status = 1;
     result.data = (void*)image;
@@ -1219,9 +1227,6 @@ extern "C" WINAPI const char* hide_window(HWND window) {
 }
 
 void arrangeWindowsX11(HWND* windows, int count) {
-    auto *x11Application = app->nativeInterface<QNativeInterface::QX11Application>();
-    auto connection = x11Application->connection();
-
     std::vector<CustomWindow*> windowList;
     for (int i = 0; i < count; i++) {
         if (windows[i] == MAIN_WINDOW) continue;
@@ -1231,12 +1236,14 @@ void arrangeWindowsX11(HWND* windows, int count) {
     for (int i = 0; i < windowList.size() - 1; i++) {
         WId configOptions[] = { windowList[i + 1]->window()->winId(), XCB_STACK_MODE_BELOW };
         xcb_configure_window(
-            connection,
+            globalXcbConnection,
             windowList[i]->window()->winId(),
             XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE,
             configOptions
         );
     }
+
+    xcb_flush(globalXcbConnection);
 }
 
 void arrangeWindowsWayland(HWND* windows, int count) {

@@ -29,10 +29,10 @@ The native Linux version works with BepInEx 5. BepInEx is a mod loader for games
 
     ```bash
     # Debian/Ubuntu based
-    sudo apt install pkg-config qt6-base-dev libxcb1-dev git curl
+    sudo apt install pkg-config qt6-base-dev libxcb1-dev libglew-dev git curl
 
     # Arch
-    sudo pacman -S --needed pkgconf qt6-base libxcb git curl
+    sudo pacman -S --needed pkgconf qt6-base libxcb glew git curl
     ```
 
 3. Clone this project:
@@ -69,10 +69,10 @@ To build, you need these packages:
 
 ```bash
 # Debian/Ubuntu based
-sudo apt install libwine-dev pkg-config qt6-base-dev libxcb1-dev libglew-dev git
+sudo apt install libwine-dev pkg-config qt6-base-dev libxcb1-dev git
 
 # Arch
-sudo pacman -S --needed wine-staging pkgconf qt6-base libxcb glew git
+sudo pacman -S --needed wine-staging pkgconf qt6-base libxcb git
 ```
 
 Clone this project:

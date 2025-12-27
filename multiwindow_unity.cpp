@@ -472,7 +472,7 @@ CustomWindow::CustomWindow() {
     setAttribute(Qt::WA_TranslucentBackground);
     setWindowFlag(Qt::WindowStaysOnTopHint); // Does not work on Wayland, have to use JS hack above.
     setWindowFlag(Qt::WindowDoesNotAcceptFocus);
-    setWindowFlag(Qt::WindowTransparentForInput);
+    // setWindowFlag(Qt::WindowTransparentForInput);
 
     this->customId = rand() % 100000;
     this->targetX = 0;

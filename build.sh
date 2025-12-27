@@ -48,7 +48,7 @@ if [ $IS_WINE -eq 1 ]; then
     wineg++ -o multiwindow_unity.dll -shared multiwindow_unity.cpp multiwindow_unity.dll.spec `pkg-config Qt6Widgets Qt6DBus xcb --libs --cflags` -ld3d11 -O3 $COMPILE_ARGUMENTS
     mv multiwindow_unity.dll.so "$1/Rhythm Doctor_Data/Plugins/x86_64/multiwindow_unity.dll"
 else
-    g++ -o multiwindow_unity.so -fPIC -shared multiwindow_unity.cpp `pkg-config Qt6Widgets Qt6DBus xcb glew --libs --cflags` -Og $COMPILE_ARGUMENTS
+    docker run -w /app -v .:/app -u 1000:1000 --rm --init -it rd-multiwindow-linux:latest /bin/bash steam_sniper/_build.sh
     mv multiwindow_unity.so "$1/Rhythm Doctor_Data/Plugins/multiwindow_unity.so"
 fi
 

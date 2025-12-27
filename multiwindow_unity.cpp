@@ -504,6 +504,10 @@ CustomWindow::CustomWindow() {
     this->setFixedSize(10, 10);
     #endif
 
+    QPixmap* cursor = new QPixmap(1, 1);
+    cursor->fill(QColor(0, 0, 0, 0));
+    this->setCursor(QCursor(*cursor));
+
     // testLabel = new QLabel("Example Text", this);
     // testLabel->setStyleSheet("QLabel { color: white; font-size: 24px; }");
     // testLabel->show();

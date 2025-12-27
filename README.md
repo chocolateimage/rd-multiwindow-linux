@@ -16,7 +16,7 @@ Other tools: [![Logo](https://party.playlook.de/public/qrhythmcafe-icon.png) QRh
 
 You can either choose from these versions:
 
-- [Native Linux](#native-linux) (experimental)
+- [Native Linux](#native-linux)
 - [Proton](#proton)
 
 ### Native Linux

@@ -25,7 +25,7 @@ The native Linux version works with BepInEx 5. BepInEx is a mod loader for games
 
 1. You'll need BepInEx 5 installed. If you do not have it, follow the [install guide](https://docs.bepinex.dev/articles/user_guide/installation/index.html?tabs=tabid-nix), then also follow the [Steam guide](https://docs.bepinex.dev/articles/advanced/steam_interop.html).
 
-2. Download the ZIP and extract it to the root of the game. `libQt5WaylandClient.so.5` should be in the same folder as `UnityPlayer.so` and `run_bepinex.sh`.
+2. [Download the latest release ZIP](https://github.com/chocolateimage/rd-multiwindow-linux/releases/latest/download/linux-steam-runtime-multiwindow.zip) and extract it to the root of the game. `libQt5WaylandClient.so.5` should be in the same folder as `UnityPlayer.so` and `run_bepinex.sh`.
 
 3. In the Steam compatibility settings, do not force the runtime.
 

@@ -27,10 +27,8 @@ elif [ -f "$1/Rhythm Doctor" ]; then
     if [ -f "LinuxWindowDancePlugin/bin/Debug/netstandard2.1/LinuxWindowDancePlugin.dll" ]; then
         echo "Local plugin detected, not downloading."
     else
-        echo "Downloading plugin..."
-        mkdir -p "$1/BepInEx/plugins"
-        curl -Lso "$1/BepInEx/plugins/LinuxWindowDancePlugin.dll" "https://github.com/chocolateimage/rd-multiwindow-linux/releases/download/bepinex/LinuxWindowDancePlugin.dll"
-        echo "Finished downloading. Building..."
+        echo "ERROR: Please follow the readme. (you are using the Linux version and trying to build. This will not work for the Steam Runtime)"
+        exit 1
     fi
 else
     echo "ERROR: First argument must be a path to Rhythm Doctor."

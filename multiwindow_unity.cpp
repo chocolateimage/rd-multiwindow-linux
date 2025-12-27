@@ -113,6 +113,8 @@ public:
 // puts your hands up in the sky. puts your hands up in the sky. puts your puts your. PUT YOUR HANDS UP HIGH
 // https://youtu.be/eBC9r5WMNng
 
+print("KWin Multiwindow Plugin")
+
 const mainWindow = workspace.stackingOrder.find((win) => win.pid == appPid);
 let lastOrder = "";
 const lastConstraints = [];
@@ -215,6 +217,16 @@ workspace.windowAdded.connect((win) => {
     win.minimizedChanged.connect(() => {
         win.minimized = false;
     });
+
+    win.maximizedChanged.connect(() => {
+        win.setMaximize(false, false);
+    });
+
+    win.activeChanged.connect(() => {
+        if (!win.active) return;
+        if (win.destroyed) return;
+        updateWindow();
+    })
 
     win.interactiveMoveResizeFinished.connect(() => {
         updateWindow();
@@ -354,6 +366,11 @@ void checkForKWinWayland() {
         return;
     }
 
+    if (qgetenv("RD_DANCE_NO_WAYLAND").toLower() == "1") {
+        qInfo() << "Wayland force disabled.";
+        return;
+    }
+
     useWayland = true;
 }
 
@@ -472,7 +489,9 @@ CustomWindow::CustomWindow() {
     setAttribute(Qt::WA_TranslucentBackground);
     setWindowFlag(Qt::WindowStaysOnTopHint); // Does not work on Wayland, have to use JS hack above.
     setWindowFlag(Qt::WindowDoesNotAcceptFocus);
-    // setWindowFlag(Qt::WindowTransparentForInput);
+    #ifndef STEAM_RUNTIME
+    setWindowFlag(Qt::WindowTransparentForInput);
+    #endif
 
     this->customId = rand() % 100000;
     this->targetX = 0;
@@ -481,7 +500,9 @@ CustomWindow::CustomWindow() {
     this->targetHeight = 1;
     this->targetOpacity = 0;
 
+    #ifndef STEAM_RUNTIME
     this->setFixedSize(10, 10);
+    #endif
 
     // testLabel = new QLabel("Example Text", this);
     // testLabel->setStyleSheet("QLabel { color: white; font-size: 24px; }");

@@ -23,39 +23,13 @@ You can either choose from these versions:
 
 The native Linux version works with BepInEx 5. BepInEx is a mod loader for games. If you do not want to use BepInEx, use the [Proton version](#proton).
 
-1. You'll need BepInEx 5 installed. If you do not have it, follow the [install guide](https://docs.bepinex.dev/articles/user_guide/installation/index.html?tabs=tabid-nix), then also follow the [Steam guide](https://docs.bepinex.dev/articles/advanced/steam_interop.html). Open the game once, close it, then open `BepInEx/config/BepInEx.cfg` and change `HideManagerGameObject` to `true`.
+1. You'll need BepInEx 5 installed. If you do not have it, follow the [install guide](https://docs.bepinex.dev/articles/user_guide/installation/index.html?tabs=tabid-nix), then also follow the [Steam guide](https://docs.bepinex.dev/articles/advanced/steam_interop.html).
 
-2. Install these packages:
+2. Download the ZIP and extract it to the root of the game. `libQt5WaylandClient.so.5` should be in the same folder as `UnityPlayer.so` and `run_bepinex.sh`.
 
-    ```bash
-    # Debian/Ubuntu based
-    sudo apt install pkg-config qt6-base-dev libxcb1-dev libglew-dev git curl
+3. In the Steam compatibility settings, do not force the runtime.
 
-    # Arch
-    sudo pacman -S --needed pkgconf qt6-base libxcb glew git curl
-    ```
-
-3. Clone this project:
-
-    ```bash
-    git clone https://github.com/chocolateimage/rd-multiwindow-linux.git
-    cd rd-multiwindow-linux
-    ```
-
-4. Build (will also download the BepInEx plugin):
-
-    ```bash
-    ./build.sh "/path/to/steamapps/common/Rhythm Doctor"
-
-    # OR this if you want Wayland support (only KWin is supported, else it falls back to X11). This allows real offscreen windows.
-
-    ./build.sh "/path/to/steamapps/common/Rhythm Doctor" --wayland
-    ```
-
-5. In the Steam compatibility settings, force the runtime to "Legacy runtime 1.0"
-    ![Legacy runtime forced](https://party.playlook.de/public/steam-rd-legacy.png)
-
-6. Open the game, go to the settings and select the window dance option in the accessibility tab. Have fun!
+4. Open the game, go to the settings and select the window dance option in the accessibility tab. Have fun!
 
 If you found this plugin useful or cool, consider starring the GitHub repo!
 

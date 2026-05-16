@@ -35,7 +35,7 @@
   </ItemGroup>
 
   <Target Name="FindGameAndIncludeReferences" BeforeTargets="ResolveAssemblyReferences" Condition="'$(_NitroxDiscovery_TaskAssembly)' != ''">
-    <DiscoverGame GameName="Rhythm Doctor">
+    <DiscoverGame GameName="Rhythm Doctor" Condition="'$(GameDir)' == ''">
         <Output TaskParameter="GamePath" PropertyName="GameDir" />
     </DiscoverGame>
     <Error Condition="'$(GameDir)' == ''" Text="Failed to find the game 'Rhythm Doctor' on your machine" />

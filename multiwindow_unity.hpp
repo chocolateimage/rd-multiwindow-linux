@@ -20,6 +20,12 @@ class CustomWindow : public QWidget {
     int cutoffX = 0;
     int cutoffY = 0;
 
+    int debugTextureUpdateCount = 0;
+    int debugCopyCount = 0;
+    int debugPaintCount = 0;
+    bool debugLoggedMissingTexture = false;
+    bool debugLoggedNullImage = false;
+
 #ifdef WITH_WINE
     ID3D11Resource* resource = nullptr;
     ID3D11Texture2D* texture = nullptr;
@@ -32,6 +38,8 @@ class CustomWindow : public QWidget {
 #else
     GLuint glTextureId = -1;
     void* tempTexture = nullptr;
+    bool textureUsesOpenGL = false;
+    bool hasTexturePixels = false;
 #endif
 
     QImage* qtImage = nullptr;
@@ -46,6 +54,7 @@ class CustomWindow : public QWidget {
 #else
     void setTexture(GLuint textureId);
     void setTextureSize(int w, int h);
+    void setTexturePixels(const void* pixels, int byteCount, int w, int h);
 #endif
     bool copyTexture();
 

@@ -24,10 +24,11 @@ elif [ -f "$1/Rhythm Doctor" ]; then
         exit 1
     fi
 
-    if [ -f "LinuxWindowDancePlugin/bin/Debug/netstandard2.1/LinuxWindowDancePlugin.dll" ]; then
-        echo "Local plugin detected, not downloading."
-    else
-        echo "ERROR: Please follow the readme. (you are using the Linux version and trying to build. This will not work for the Steam Runtime)"
+    echo "Building managed BepInEx plugin..."
+    dotnet build LinuxWindowDancePlugin/LinuxWindowDancePlugin.csproj -c Debug -p:GameDir="$1"
+
+    if [ ! -f "LinuxWindowDancePlugin/bin/Debug/netstandard2.1/LinuxWindowDancePlugin.dll" ]; then
+        echo "ERROR: Failed to build LinuxWindowDancePlugin.dll"
         exit 1
     fi
 else
@@ -41,6 +42,9 @@ if [ $IS_WINE -eq 1 ]; then
 else
     g++ -o multiwindow_unity.so -fPIC -shared multiwindow_unity.cpp `pkg-config Qt6Widgets Qt6DBus xcb glew --libs --cflags` -Og $COMPILE_ARGUMENTS
     mv multiwindow_unity.so "$1/Rhythm Doctor_Data/Plugins/multiwindow_unity.so"
+
+    mkdir -p "$1/BepInEx/plugins"
+    cp "LinuxWindowDancePlugin/bin/Debug/netstandard2.1/LinuxWindowDancePlugin.dll" "$1/BepInEx/plugins/LinuxWindowDancePlugin.dll"
 fi
 
 echo "Finished"

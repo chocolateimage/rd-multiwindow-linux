@@ -103,10 +103,57 @@ std::vector<CustomWindow*> allCustomWindows;
 QMutex customWindowMutex;
 std::vector<WId> storedWindowOrder;
 
+static IUnityInterfaces* s_UnityInterfaces = NULL;
+static IUnityGraphics* s_Graphics = NULL;
+static UnityGfxRenderer s_RendererType = kUnityGfxRendererNull;
+static bool s_DebugLoggingEnabled = false;
+
 xcb_connection_t* globalXcbConnection;
 Hyprctl* hyprctl = nullptr;
 
 std::string boolToStr(bool value) { return value ? "true" : "false"; }
+
+bool isTruthyEnvValue(QByteArray value) {
+    value = value.trimmed().toLower();
+    return !value.isEmpty() && value != "0" && value != "false" && value != "off" && value != "no";
+}
+
+const char* rendererTypeToString(UnityGfxRenderer rendererType) {
+    switch (rendererType) {
+    case kUnityGfxRendererOpenGLCore:
+        return "OpenGLCore";
+    case kUnityGfxRendererVulkan:
+        return "Vulkan";
+    case kUnityGfxRendererD3D11:
+        return "D3D11";
+    case kUnityGfxRendererNull:
+        return "Null";
+    default:
+        return "Other";
+    }
+}
+
+QString samplePixelSummary(const unsigned char* pixels, int width, int height) {
+    if (pixels == nullptr || width <= 0 || height <= 0) {
+        return "pixels=null";
+    }
+
+    auto sample = [&](int x, int y) {
+        x = std::max(0, std::min(x, width - 1));
+        y = std::max(0, std::min(y, height - 1));
+        int index = (y * width + x) * 4;
+        return QString("(%1,%2,%3,%4)")
+            .arg((int)pixels[index + 0])
+            .arg((int)pixels[index + 1])
+            .arg((int)pixels[index + 2])
+            .arg((int)pixels[index + 3]);
+    };
+
+    return QString("tl=%1 center=%2 br=%3")
+        .arg(sample(0, 0))
+        .arg(sample(width / 2, height / 2))
+        .arg(sample(width - 1, height - 1));
+}
 
 char* createString(const char* string) {
 #ifdef WITH_WINE
@@ -429,6 +476,8 @@ void createApplication() {
         return;
     }
     createdApplication = true;
+    s_DebugLoggingEnabled = isTruthyEnvValue(qgetenv("RD_DANCE_DEBUG"));
+    qInfo() << "RD_DANCE_DEBUG:" << s_DebugLoggingEnabled;
     needsX11Cutoff = doesDesktopNeedCutoff();
     checkForWayland();
 #ifdef WITH_WINE
@@ -626,12 +675,53 @@ bool CustomWindow::copyTexture() {
 
 #else
 
-void CustomWindow::setTexture(GLuint textureId) { this->glTextureId = textureId; }
+void CustomWindow::setTexture(GLuint textureId) {
+    this->glTextureId = textureId;
+    this->textureUsesOpenGL = true;
+    if (s_DebugLoggingEnabled) {
+        qInfo() << "[TextureDebug] setTexture(OpenGL) window" << this->customId << "textureId" << textureId;
+    }
+}
 
 void CustomWindow::setTextureSize(int w, int h) {
+    SAFE_DELETE(this->qtImage);
     this->qtImage = new QImage(w, h, QImage::Format_RGBA8888_Premultiplied);
     SAFE_FREE(this->tempTexture);
     tempTexture = malloc(w * h * 4);
+    this->hasTexturePixels = false;
+    if (s_DebugLoggingEnabled) {
+        qInfo() << "[TextureDebug] setTextureSize window" << this->customId << "size" << w << "x" << h;
+    }
+}
+
+void CustomWindow::setTexturePixels(const void* pixels, int byteCount, int w, int h) {
+    if (w <= 0 || h <= 0) {
+        qWarning() << "[TextureDebug] setTexturePixels ignored invalid size for window" << this->customId << w << h;
+        return;
+    }
+
+    int expectedByteCount = w * h * 4;
+    if (byteCount < expectedByteCount || pixels == nullptr) {
+        qWarning() << "[TextureDebug] setTexturePixels ignored invalid pixel payload for window" << this->customId
+                   << "bytes" << byteCount << "expected" << expectedByteCount << "pixelsNull" << (pixels == nullptr);
+        return;
+    }
+
+    if (this->qtImage == nullptr || this->qtImage->width() != w || this->qtImage->height() != h ||
+        this->tempTexture == nullptr) {
+        this->setTextureSize(w, h);
+    }
+
+    memcpy(this->tempTexture, pixels, expectedByteCount);
+    this->textureUsesOpenGL = false;
+    this->hasTexturePixels = true;
+    this->debugLoggedMissingTexture = false;
+
+    if (s_DebugLoggingEnabled && (this->debugTextureUpdateCount < 3 || this->debugTextureUpdateCount % 120 == 0)) {
+        qInfo() << "[TextureDebug] setTexturePixels window" << this->customId << "size" << w << "x" << h << "bytes"
+                << byteCount << samplePixelSummary((const unsigned char*)pixels, w, h);
+    }
+    this->debugTextureUpdateCount++;
 }
 
 bool CustomWindow::copyTexture() {
@@ -647,8 +737,23 @@ bool CustomWindow::copyTexture() {
         return false;
     }
 
-    glBindTexture(GL_TEXTURE_2D, this->glTextureId);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, tempTexture);
+    if (this->textureUsesOpenGL) {
+        glBindTexture(GL_TEXTURE_2D, this->glTextureId);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, tempTexture);
+        GLenum glError = glGetError();
+        if (glError != GL_NO_ERROR) {
+            qWarning() << "[TextureDebug] glGetTexImage error for window" << this->customId << "error" << glError;
+        } else if (s_DebugLoggingEnabled && (this->debugCopyCount < 3 || this->debugCopyCount % 120 == 0)) {
+            qInfo() << "[TextureDebug] copyTexture(OpenGL) window" << this->customId << "textureId" << this->glTextureId
+                    << "size" << this->qtImage->width() << "x" << this->qtImage->height();
+        }
+    } else if (!this->hasTexturePixels) {
+        if (!this->debugLoggedMissingTexture || s_DebugLoggingEnabled) {
+            qWarning() << "[TextureDebug] copyTexture waiting for CPU/Vulkan pixels for window" << this->customId;
+        }
+        this->debugLoggedMissingTexture = true;
+        return false;
+    }
 
     int bytesPerLine = qtImage->bytesPerLine();
     int height = qtImage->height();
@@ -658,6 +763,14 @@ bool CustomWindow::copyTexture() {
         int invertedY = (height - i - 1);
         memcpy(startingBits + i * bytesPerLine, source + invertedY * bytesPerLine, bytesPerLine);
     }
+
+    if (s_DebugLoggingEnabled && (this->debugCopyCount < 3 || this->debugCopyCount % 120 == 0)) {
+        qInfo() << "[TextureDebug] copyTexture(" << (this->textureUsesOpenGL ? "OpenGL" : "CPU/Vulkan") << ") window"
+                << this->customId << "image" << this->qtImage->width() << "x" << this->qtImage->height()
+                << samplePixelSummary((const unsigned char*)this->qtImage->constBits(), this->qtImage->width(),
+                                      this->qtImage->height());
+    }
+    this->debugCopyCount++;
 
     return true;
 }
@@ -844,10 +957,24 @@ void CustomWindow::paintEvent(QPaintEvent* paintEvent) {
         return;
     }
     if (this->qtImage == nullptr) {
+        if (s_DebugLoggingEnabled && !this->debugLoggedNullImage) {
+            qWarning() << "[PaintDebug] paintEvent skipped because qtImage is null for window" << this->customId;
+        }
+        this->debugLoggedNullImage = true;
         return;
     }
+    this->debugLoggedNullImage = false;
 
     qreal scaling = waylandType == WaylandType::None ? this->devicePixelRatio() : 1;
+
+    if (s_DebugLoggingEnabled && (this->debugPaintCount < 3 || this->debugPaintCount % 120 == 0)) {
+        qInfo() << "[PaintDebug] paintEvent window" << this->customId << "target" << this->targetWidth << "x"
+                << this->targetHeight << "image" << this->qtImage->width() << "x" << this->qtImage->height()
+                << "opacity" << this->targetOpacity
+                << samplePixelSummary((const unsigned char*)this->qtImage->constBits(), this->qtImage->width(),
+                                      this->qtImage->height());
+    }
+    this->debugPaintCount++;
 
     painter.drawImage(QRect(this->cutoffX, this->cutoffY, this->targetWidth / scaling, this->targetHeight / scaling),
                       *this->qtImage, this->qtImage->rect());
@@ -1303,7 +1430,14 @@ extern "C" char* set_window_texture(HWND window,
 #ifdef WITH_WINE
     customWindow->setTexture((ID3D11Resource*)texturePtr);
 #else
-    customWindow->setTexture(texturePtr);
+    if (s_RendererType == kUnityGfxRendererOpenGLCore) {
+        customWindow->setTexture(texturePtr);
+    } else {
+        customWindow->textureUsesOpenGL = false;
+        qInfo() << "[TextureDebug] set_window_texture called while renderer is" << rendererTypeToString(s_RendererType)
+                << "for window" << customWindow->customId << "texturePtr" << texturePtr
+                << "- waiting for CPU/Vulkan upload path.";
+    }
 #endif
     return createString("");
 }
@@ -1312,6 +1446,17 @@ extern "C" char* set_window_texture(HWND window,
 extern "C" void set_window_texture_size(HWND window, int w, int h) {
     CustomWindow* customWindow = (CustomWindow*)window;
     customWindow->setTextureSize(w, h);
+}
+
+extern "C" void set_window_texture_pixels(HWND window, const unsigned char* pixels, int byteCount, int w, int h) {
+    if (window == MAIN_WINDOW) {
+        return;
+    }
+
+    CustomWindow* customWindow = (CustomWindow*)window;
+    customWindowMutex.lock();
+    customWindow->setTexturePixels(pixels, byteCount, w, h);
+    customWindowMutex.unlock();
 }
 #endif
 
@@ -1632,14 +1777,11 @@ extern "C" const char* get_info() {
 }
 #endif
 
-static IUnityInterfaces* s_UnityInterfaces = NULL;
-static IUnityGraphics* s_Graphics = NULL;
-static UnityGfxRenderer s_RendererType = kUnityGfxRendererNull;
-
 static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType eventType) {
     switch (eventType) {
     case kUnityGfxDeviceEventInitialize: {
         s_RendererType = s_Graphics->GetRenderer();
+        qInfo() << "Unity graphics renderer:" << rendererTypeToString(s_RendererType);
 #ifdef WITH_WINE
         if (s_RendererType != kUnityGfxRendererD3D11) {
             blockWithError("Only D3D11 is supported.");
@@ -1651,9 +1793,12 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
         }
         app->device = d3d->GetDevice();
 #else
-        if (s_RendererType != kUnityGfxRendererOpenGLCore) {
-            blockWithError("Only OpenGL Core is supported.");
+        if (s_RendererType != kUnityGfxRendererOpenGLCore && s_RendererType != kUnityGfxRendererVulkan) {
+            blockWithError("Only OpenGL Core and Vulkan are supported.");
             return;
+        }
+        if (s_RendererType == kUnityGfxRendererVulkan) {
+            qInfo() << "[TextureDebug] Vulkan renderer detected, using CPU upload compatibility path for custom windows.";
         }
 #endif
         break;

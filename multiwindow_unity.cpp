@@ -202,6 +202,15 @@ static inline void requestWindowUpdate(CustomWindow* customWindow) {
     QMetaObject::invokeMethod(customWindow, qOverload<>(&QWidget::update), Qt::QueuedConnection);
 }
 
+static inline bool shouldProcessTextureFrame(CustomWindow* customWindow) {
+    if (customWindow == nullptr) {
+        return false;
+    }
+
+    return !customWindow->isClosing && customWindow->isVisible && customWindow->targetOpacity > 0 &&
+           customWindow->targetWidth > 0 && customWindow->targetHeight > 0 && customWindow->qtImage != nullptr;
+}
+
 #ifndef WITH_WINE
 static void loadVulkanFunctions(const UnityVulkanInstance& instance) {
     auto getProc = [&](const char* name) -> PFN_vkVoidFunction {
@@ -2122,6 +2131,10 @@ static void UNITY_INTERFACE_API render(int eventID) {
     }
 #endif
     for (auto customWindow : allCustomWindows) {
+        if (!shouldProcessTextureFrame(customWindow)) {
+            continue;
+        }
+
         if (customWindow->textureUsesOpenGL) {
             if (customWindow->copyTexture()) {
                 requestWindowUpdate(customWindow);

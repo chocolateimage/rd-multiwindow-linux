@@ -10,7 +10,7 @@ public sealed class VulkanTextureBridge : MonoBehaviour
 {
     private sealed class TrackedWindow
     {
-        public CustomWindowLinux Window = null!;
+        public CustomWindowLinux Window = null;
         public bool LoggedMissingSourceTexture;
         public bool LoggedMissingWindowPtr;
         public bool LoggedMissingNativeTexture;
@@ -20,9 +20,52 @@ public sealed class VulkanTextureBridge : MonoBehaviour
         public IntPtr NativeTexturePtr = IntPtr.Zero;
     }
 
-    private static VulkanTextureBridge? instance;
+    private static VulkanTextureBridge instance;
     private readonly List<TrackedWindow> trackedWindows = new();
     private readonly WaitForEndOfFrame endOfFrame = new();
+    private static readonly System.Reflection.BindingFlags VisibleMemberFlags =
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+    private static System.Reflection.PropertyInfo cachedVisibleProperty;
+    private static System.Reflection.FieldInfo cachedVisibleField;
+    private static bool resolvedVisibleMember;
+
+    private static bool ShouldIssueVulkanWork(TrackedWindow trackedWindow)
+    {
+        return trackedWindow.Window != null && IsTrackedWindowVisible(trackedWindow.Window);
+    }
+
+    private static bool IsTrackedWindowVisible(CustomWindowLinux window)
+    {
+        if (window == null)
+        {
+            return false;
+        }
+
+        if (!resolvedVisibleMember)
+        {
+            Type windowType = window.GetType();
+            cachedVisibleProperty = windowType.GetProperty("visible", VisibleMemberFlags);
+            cachedVisibleField = windowType.GetField("visible", VisibleMemberFlags);
+            resolvedVisibleMember = true;
+
+            if (cachedVisibleProperty == null && cachedVisibleField == null)
+            {
+                Plugin.LogDebug("VulkanTextureBridge could not resolve a visible member on CustomWindowLinux; falling back to processing registered windows.");
+            }
+        }
+
+        if (cachedVisibleProperty != null && cachedVisibleProperty.PropertyType == typeof(bool))
+        {
+            return (bool)cachedVisibleProperty.GetValue(window);
+        }
+
+        if (cachedVisibleField != null && cachedVisibleField.FieldType == typeof(bool))
+        {
+            return (bool)cachedVisibleField.GetValue(window);
+        }
+
+        return true;
+    }
 
     public static bool IsSupported => SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan;
 
@@ -129,6 +172,11 @@ public sealed class VulkanTextureBridge : MonoBehaviour
         {
             Plugin.Logger.LogWarning("Vulkan bridge stopped because target window reference is gone.");
             return false;
+        }
+
+        if (!ShouldIssueVulkanWork(trackedWindow))
+        {
+            return true;
         }
 
         RenderTexture sourceTexture = trackedWindow.Window.renderTexture;

@@ -24,10 +24,10 @@ elif [ -f "$1/Rhythm Doctor" ]; then
         exit 1
     fi
 
-    echo "Building managed BepInEx plugin..."
-    dotnet build LinuxWindowDancePlugin/LinuxWindowDancePlugin.csproj -c Debug -p:GameDir="$1"
+    echo "Building managed BepInEx plugin (Release)..."
+    dotnet build LinuxWindowDancePlugin/LinuxWindowDancePlugin.csproj -c Release -p:GameDir="$1"
 
-    if [ ! -f "LinuxWindowDancePlugin/bin/Debug/netstandard2.1/LinuxWindowDancePlugin.dll" ]; then
+    if [ ! -f "LinuxWindowDancePlugin/bin/Release/netstandard2.1/LinuxWindowDancePlugin.dll" ]; then
         echo "ERROR: Failed to build LinuxWindowDancePlugin.dll"
         exit 1
     fi
@@ -40,11 +40,11 @@ if [ $IS_WINE -eq 1 ]; then
     wineg++ -o multiwindow_unity.dll -shared multiwindow_unity.cpp multiwindow_unity.dll.spec `pkg-config Qt6Widgets Qt6DBus xcb --libs --cflags` -ld3d11 -O3 $COMPILE_ARGUMENTS
     mv multiwindow_unity.dll.so "$1/Rhythm Doctor_Data/Plugins/x86_64/multiwindow_unity.dll"
 else
-    g++ -o multiwindow_unity.so -fPIC -shared multiwindow_unity.cpp `pkg-config Qt6Widgets Qt6DBus xcb glew --libs --cflags` -Og $COMPILE_ARGUMENTS
+    g++ -o multiwindow_unity.so -fPIC -shared multiwindow_unity.cpp `pkg-config Qt6Widgets Qt6DBus xcb glew --libs --cflags` -O3 -DNDEBUG $COMPILE_ARGUMENTS
     mv multiwindow_unity.so "$1/Rhythm Doctor_Data/Plugins/multiwindow_unity.so"
 
     mkdir -p "$1/BepInEx/plugins"
-    cp "LinuxWindowDancePlugin/bin/Debug/netstandard2.1/LinuxWindowDancePlugin.dll" "$1/BepInEx/plugins/LinuxWindowDancePlugin.dll"
+    cp "LinuxWindowDancePlugin/bin/Release/netstandard2.1/LinuxWindowDancePlugin.dll" "$1/BepInEx/plugins/LinuxWindowDancePlugin.dll"
 fi
 
 echo "Finished"

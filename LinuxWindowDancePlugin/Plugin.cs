@@ -42,7 +42,7 @@ public class Plugin : BaseUnityPlugin
         Logger.LogInfo($"Graphics device type: {UnityEngine.SystemInfo.graphicsDeviceType}");
         if (VulkanTextureBridge.IsSupported)
         {
-            Logger.LogInfo("Vulkan detected; custom windows will use CPU readback compatibility mode.");
+            Logger.LogInfo("Vulkan detected; custom windows will use native texture registration + plugin events.");
         }
 
         Logger.LogInfo($"Plugin {MyPluginInfo.PLUGIN_GUID} is loaded!");

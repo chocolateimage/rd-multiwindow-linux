@@ -1,5 +1,8 @@
 #pragma once
 
+#include <atomic>
+#include <cstddef>
+
 class CustomWindow : public QWidget {
   public:
     int customId;
@@ -25,6 +28,8 @@ class CustomWindow : public QWidget {
     int debugPaintCount = 0;
     bool debugLoggedMissingTexture = false;
     bool debugLoggedNullImage = false;
+    bool textureDataIsUpsideDown = false;
+    std::atomic_bool updateQueued = false;
 
 #ifdef WITH_WINE
     ID3D11Resource* resource = nullptr;
@@ -39,7 +44,19 @@ class CustomWindow : public QWidget {
     GLuint glTextureId = -1;
     void* tempTexture = nullptr;
     bool textureUsesOpenGL = false;
+    bool textureUsesVulkan = false;
     bool hasTexturePixels = false;
+    void* unityVulkanTexture = nullptr;
+    void* vulkanReadbackBuffer = nullptr;
+    void* vulkanReadbackMemory = nullptr;
+    void* vulkanReadbackMapped = nullptr;
+    size_t vulkanReadbackSize = 0;
+    bool vulkanReadbackHostCoherent = false;
+    int vulkanReadbackWidth = 0;
+    int vulkanReadbackHeight = 0;
+    bool vulkanReadbackSwapRedBlue = false;
+    unsigned long long vulkanReadbackSubmittedFrame = 0;
+    bool vulkanReadbackPending = false;
 #endif
 
     QImage* qtImage = nullptr;
@@ -53,6 +70,7 @@ class CustomWindow : public QWidget {
     void setTexture(ID3D11Resource* resource);
 #else
     void setTexture(GLuint textureId);
+    void setVulkanTexture(void* texturePtr);
     void setTextureSize(int w, int h);
     void setTexturePixels(const void* pixels, int byteCount, int w, int h);
 #endif

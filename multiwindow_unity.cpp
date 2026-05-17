@@ -23,6 +23,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <iostream>
 typedef void* HANDLE;
 typedef void* HWND;
@@ -30,6 +31,8 @@ typedef bool BOOL;
 typedef char* LPSTR;
 #define WINAPI
 #include "unity/IUnityGraphics.h"
+#define VK_NO_PROTOTYPES
+#include "unity/IUnityGraphicsVulkan.h"
 #include <GL/glew.h>
 #include <QtCore/QtCore>
 #include <QtGui/QPainter>
@@ -107,6 +110,22 @@ static IUnityInterfaces* s_UnityInterfaces = NULL;
 static IUnityGraphics* s_Graphics = NULL;
 static UnityGfxRenderer s_RendererType = kUnityGfxRendererNull;
 static bool s_DebugLoggingEnabled = false;
+#ifndef WITH_WINE
+static IUnityGraphicsVulkan* s_GraphicsVulkan = NULL;
+static PFN_vkGetPhysicalDeviceMemoryProperties s_vkGetPhysicalDeviceMemoryProperties = nullptr;
+static PFN_vkCreateBuffer s_vkCreateBuffer = nullptr;
+static PFN_vkDestroyBuffer s_vkDestroyBuffer = nullptr;
+static PFN_vkGetBufferMemoryRequirements s_vkGetBufferMemoryRequirements = nullptr;
+static PFN_vkAllocateMemory s_vkAllocateMemory = nullptr;
+static PFN_vkFreeMemory s_vkFreeMemory = nullptr;
+static PFN_vkBindBufferMemory s_vkBindBufferMemory = nullptr;
+static PFN_vkMapMemory s_vkMapMemory = nullptr;
+static PFN_vkUnmapMemory s_vkUnmapMemory = nullptr;
+static PFN_vkInvalidateMappedMemoryRanges s_vkInvalidateMappedMemoryRanges = nullptr;
+static PFN_vkCmdCopyImageToBuffer s_vkCmdCopyImageToBuffer = nullptr;
+static PFN_vkCmdPipelineBarrier s_vkCmdPipelineBarrier = nullptr;
+static constexpr int kRenderEventVulkanCopy = 1;
+#endif
 
 xcb_connection_t* globalXcbConnection;
 Hyprctl* hyprctl = nullptr;
@@ -164,6 +183,337 @@ char* createString(const char* string) {
     return address;
 #endif
 }
+
+static inline void requestWindowUpdate(CustomWindow* customWindow) {
+    if (customWindow == nullptr) {
+        return;
+    }
+
+    if (customWindow->isClosing || !customWindow->isVisible || customWindow->targetOpacity <= 0 ||
+        customWindow->targetWidth <= 0 || customWindow->targetHeight <= 0 || customWindow->qtImage == nullptr) {
+        return;
+    }
+
+    bool updateWasAlreadyQueued = customWindow->updateQueued.exchange(true, std::memory_order_acq_rel);
+    if (updateWasAlreadyQueued) {
+        return;
+    }
+
+    QMetaObject::invokeMethod(customWindow, qOverload<>(&QWidget::update), Qt::QueuedConnection);
+}
+
+#ifndef WITH_WINE
+static void loadVulkanFunctions(const UnityVulkanInstance& instance) {
+    auto getProc = [&](const char* name) -> PFN_vkVoidFunction {
+        if (instance.getInstanceProcAddr == nullptr) {
+            return nullptr;
+        }
+        return instance.getInstanceProcAddr(instance.instance, name);
+    };
+
+    s_vkGetPhysicalDeviceMemoryProperties =
+        (PFN_vkGetPhysicalDeviceMemoryProperties)getProc("vkGetPhysicalDeviceMemoryProperties");
+    s_vkCreateBuffer = (PFN_vkCreateBuffer)getProc("vkCreateBuffer");
+    s_vkDestroyBuffer = (PFN_vkDestroyBuffer)getProc("vkDestroyBuffer");
+    s_vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)getProc("vkGetBufferMemoryRequirements");
+    s_vkAllocateMemory = (PFN_vkAllocateMemory)getProc("vkAllocateMemory");
+    s_vkFreeMemory = (PFN_vkFreeMemory)getProc("vkFreeMemory");
+    s_vkBindBufferMemory = (PFN_vkBindBufferMemory)getProc("vkBindBufferMemory");
+    s_vkMapMemory = (PFN_vkMapMemory)getProc("vkMapMemory");
+    s_vkUnmapMemory = (PFN_vkUnmapMemory)getProc("vkUnmapMemory");
+    s_vkInvalidateMappedMemoryRanges = (PFN_vkInvalidateMappedMemoryRanges)getProc("vkInvalidateMappedMemoryRanges");
+    s_vkCmdCopyImageToBuffer = (PFN_vkCmdCopyImageToBuffer)getProc("vkCmdCopyImageToBuffer");
+    s_vkCmdPipelineBarrier = (PFN_vkCmdPipelineBarrier)getProc("vkCmdPipelineBarrier");
+}
+
+static uint32_t findVulkanMemoryType(uint32_t typeBits, VkMemoryPropertyFlags propertyFlags) {
+    if (s_GraphicsVulkan == nullptr || s_vkGetPhysicalDeviceMemoryProperties == nullptr) {
+        return UINT32_MAX;
+    }
+
+    UnityVulkanInstance instance = s_GraphicsVulkan->Instance();
+    VkPhysicalDeviceMemoryProperties memoryProperties = {};
+    s_vkGetPhysicalDeviceMemoryProperties(instance.physicalDevice, &memoryProperties);
+    for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
+        if ((typeBits & (1u << i)) == 0) {
+            continue;
+        }
+        if ((memoryProperties.memoryTypes[i].propertyFlags & propertyFlags) == propertyFlags) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+static void releaseVulkanReadbackResources(CustomWindow* customWindow) {
+    if (customWindow == nullptr) {
+        return;
+    }
+
+    if (s_GraphicsVulkan != nullptr) {
+        UnityVulkanInstance instance = s_GraphicsVulkan->Instance();
+        if (instance.device != VK_NULL_HANDLE) {
+            VkDeviceMemory memory = (VkDeviceMemory)customWindow->vulkanReadbackMemory;
+            VkBuffer buffer = (VkBuffer)customWindow->vulkanReadbackBuffer;
+            if (memory != VK_NULL_HANDLE && customWindow->vulkanReadbackMapped != nullptr && s_vkUnmapMemory != nullptr) {
+                s_vkUnmapMemory(instance.device, memory);
+            }
+            if (buffer != VK_NULL_HANDLE && s_vkDestroyBuffer != nullptr) {
+                s_vkDestroyBuffer(instance.device, buffer, nullptr);
+            }
+            if (memory != VK_NULL_HANDLE && s_vkFreeMemory != nullptr) {
+                s_vkFreeMemory(instance.device, memory, nullptr);
+            }
+        }
+    }
+
+    customWindow->vulkanReadbackBuffer = nullptr;
+    customWindow->vulkanReadbackMemory = nullptr;
+    customWindow->vulkanReadbackMapped = nullptr;
+    customWindow->vulkanReadbackSize = 0;
+    customWindow->vulkanReadbackHostCoherent = false;
+    customWindow->vulkanReadbackWidth = 0;
+    customWindow->vulkanReadbackHeight = 0;
+    customWindow->vulkanReadbackSwapRedBlue = false;
+    customWindow->vulkanReadbackSubmittedFrame = 0;
+    customWindow->vulkanReadbackPending = false;
+}
+
+static bool ensureVulkanReadbackResources(CustomWindow* customWindow, int width, int height) {
+    if (customWindow == nullptr || s_GraphicsVulkan == nullptr || customWindow->qtImage == nullptr || width <= 0 || height <= 0 ||
+        s_vkCreateBuffer == nullptr || s_vkGetBufferMemoryRequirements == nullptr || s_vkAllocateMemory == nullptr ||
+        s_vkBindBufferMemory == nullptr || s_vkMapMemory == nullptr) {
+        return false;
+    }
+
+    size_t requiredSize = (size_t)width * (size_t)height * 4;
+    if (customWindow->vulkanReadbackBuffer != nullptr && customWindow->vulkanReadbackMapped != nullptr &&
+        customWindow->vulkanReadbackSize == requiredSize && customWindow->vulkanReadbackWidth == width &&
+        customWindow->vulkanReadbackHeight == height) {
+        return true;
+    }
+
+    releaseVulkanReadbackResources(customWindow);
+
+    UnityVulkanInstance instance = s_GraphicsVulkan->Instance();
+    if (instance.device == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    VkBufferCreateInfo bufferCreateInfo = {};
+    bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferCreateInfo.size = requiredSize;
+    bufferCreateInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer buffer = VK_NULL_HANDLE;
+    if (s_vkCreateBuffer(instance.device, &bufferCreateInfo, nullptr, &buffer) != VK_SUCCESS) {
+        qWarning() << "[TextureDebug] Failed to create Vulkan readback buffer for window" << customWindow->customId;
+        return false;
+    }
+
+    VkMemoryRequirements requirements = {};
+    s_vkGetBufferMemoryRequirements(instance.device, buffer, &requirements);
+
+    VkMemoryPropertyFlags preferredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    uint32_t memoryTypeIndex = findVulkanMemoryType(requirements.memoryTypeBits, preferredFlags);
+    bool hostCoherent = true;
+    if (memoryTypeIndex == UINT32_MAX) {
+        preferredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        hostCoherent = false;
+        memoryTypeIndex = findVulkanMemoryType(requirements.memoryTypeBits, preferredFlags);
+    }
+    if (memoryTypeIndex == UINT32_MAX) {
+        qWarning() << "[TextureDebug] Failed to find Vulkan host-visible memory type for window" << customWindow->customId;
+        if (s_vkDestroyBuffer != nullptr) {
+            s_vkDestroyBuffer(instance.device, buffer, nullptr);
+        }
+        return false;
+    }
+
+    VkMemoryAllocateInfo allocateInfo = {};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocateInfo.allocationSize = requirements.size;
+    allocateInfo.memoryTypeIndex = memoryTypeIndex;
+
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (s_vkAllocateMemory(instance.device, &allocateInfo, nullptr, &memory) != VK_SUCCESS) {
+        qWarning() << "[TextureDebug] Failed to allocate Vulkan readback memory for window" << customWindow->customId;
+        if (s_vkDestroyBuffer != nullptr) {
+            s_vkDestroyBuffer(instance.device, buffer, nullptr);
+        }
+        return false;
+    }
+
+    if (s_vkBindBufferMemory(instance.device, buffer, memory, 0) != VK_SUCCESS) {
+        qWarning() << "[TextureDebug] Failed to bind Vulkan readback memory for window" << customWindow->customId;
+        if (s_vkFreeMemory != nullptr) {
+            s_vkFreeMemory(instance.device, memory, nullptr);
+        }
+        if (s_vkDestroyBuffer != nullptr) {
+            s_vkDestroyBuffer(instance.device, buffer, nullptr);
+        }
+        return false;
+    }
+
+    void* mapped = nullptr;
+    if (s_vkMapMemory(instance.device, memory, 0, requirements.size, 0, &mapped) != VK_SUCCESS || mapped == nullptr) {
+        qWarning() << "[TextureDebug] Failed to map Vulkan readback memory for window" << customWindow->customId;
+        if (s_vkFreeMemory != nullptr) {
+            s_vkFreeMemory(instance.device, memory, nullptr);
+        }
+        if (s_vkDestroyBuffer != nullptr) {
+            s_vkDestroyBuffer(instance.device, buffer, nullptr);
+        }
+        return false;
+    }
+
+    customWindow->vulkanReadbackBuffer = (void*)buffer;
+    customWindow->vulkanReadbackMemory = (void*)memory;
+    customWindow->vulkanReadbackMapped = mapped;
+    customWindow->vulkanReadbackSize = requiredSize;
+    customWindow->vulkanReadbackHostCoherent = hostCoherent;
+    customWindow->vulkanReadbackWidth = width;
+    customWindow->vulkanReadbackHeight = height;
+    customWindow->vulkanReadbackPending = false;
+    return true;
+}
+
+static bool processCompletedVulkanReadback(CustomWindow* customWindow, unsigned long long safeFrameNumber) {
+    if (customWindow == nullptr || !customWindow->textureUsesVulkan || !customWindow->vulkanReadbackPending ||
+        customWindow->qtImage == nullptr || customWindow->vulkanReadbackMapped == nullptr ||
+        safeFrameNumber < customWindow->vulkanReadbackSubmittedFrame) {
+        return false;
+    }
+
+    if (!customWindow->vulkanReadbackHostCoherent && s_GraphicsVulkan != nullptr && s_vkInvalidateMappedMemoryRanges != nullptr) {
+        UnityVulkanInstance instance = s_GraphicsVulkan->Instance();
+        VkMappedMemoryRange mappedRange = {};
+        mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        mappedRange.memory = (VkDeviceMemory)customWindow->vulkanReadbackMemory;
+        mappedRange.offset = 0;
+        mappedRange.size = customWindow->vulkanReadbackSize;
+        s_vkInvalidateMappedMemoryRanges(instance.device, 1, &mappedRange);
+    }
+
+    int width = customWindow->qtImage->width();
+    int height = customWindow->qtImage->height();
+    int destinationBytesPerLine = customWindow->qtImage->bytesPerLine();
+    int sourceBytesPerLine = width * 4;
+    uchar* destination = customWindow->qtImage->bits();
+    const uchar* source = (const uchar*)customWindow->vulkanReadbackMapped;
+    bool canMemcpyWithoutSwizzle =
+        !customWindow->vulkanReadbackSwapRedBlue || customWindow->qtImage->format() == QImage::Format_ARGB32;
+
+    if (canMemcpyWithoutSwizzle && destinationBytesPerLine == sourceBytesPerLine) {
+        memcpy(destination, source, (size_t)destinationBytesPerLine * (size_t)height);
+    } else {
+        for (int y = 0; y < height; ++y) {
+            uchar* destinationRow = destination + (size_t)y * (size_t)destinationBytesPerLine;
+            const uchar* sourceRow = source + (size_t)y * (size_t)sourceBytesPerLine;
+            if (canMemcpyWithoutSwizzle) {
+                memcpy(destinationRow, sourceRow, sourceBytesPerLine);
+            } else {
+                for (int x = 0; x < width; ++x) {
+                    destinationRow[x * 4 + 0] = sourceRow[x * 4 + 2];
+                    destinationRow[x * 4 + 1] = sourceRow[x * 4 + 1];
+                    destinationRow[x * 4 + 2] = sourceRow[x * 4 + 0];
+                    destinationRow[x * 4 + 3] = sourceRow[x * 4 + 3];
+                }
+            }
+        }
+    }
+
+    // Unity's Vulkan texture memory reaches us in the same bottom-up orientation
+    // expected by the existing Qt paint path used for OpenGL/CPU copies.
+    // Keep the orientation flag aligned with those paths so paintEvent performs
+    // the vertical flip before presenting into the QWidget.
+    customWindow->textureDataIsUpsideDown = true;
+    customWindow->hasTexturePixels = true;
+    customWindow->vulkanReadbackPending = false;
+    customWindow->debugLoggedMissingTexture = false;
+
+    if (s_DebugLoggingEnabled && (customWindow->debugCopyCount < 3 || customWindow->debugCopyCount % 120 == 0)) {
+        qInfo() << "[TextureDebug] copyTexture(Vulkan) window" << customWindow->customId << "image" << width << "x"
+                << height << samplePixelSummary((const unsigned char*)customWindow->qtImage->constBits(), width, height);
+    }
+    customWindow->debugCopyCount++;
+    return true;
+}
+
+static bool submitVulkanReadback(CustomWindow* customWindow, const UnityVulkanRecordingState& recordingState) {
+    if (customWindow == nullptr || !customWindow->textureUsesVulkan || customWindow->unityVulkanTexture == nullptr ||
+        customWindow->qtImage == nullptr || customWindow->vulkanReadbackPending || s_GraphicsVulkan == nullptr ||
+        s_vkCmdCopyImageToBuffer == nullptr || s_vkCmdPipelineBarrier == nullptr) {
+        return false;
+    }
+
+    UnityVulkanImage unityImage = {};
+    if (!s_GraphicsVulkan->AccessTexture(customWindow->unityVulkanTexture, UnityVulkanWholeImage,
+                                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VK_ACCESS_TRANSFER_READ_BIT, kUnityVulkanResourceAccess_PipelineBarrier,
+                                         &unityImage)) {
+        qWarning() << "[TextureDebug] AccessTexture failed for Vulkan window" << customWindow->customId;
+        return false;
+    }
+
+    int width = (int)unityImage.extent.width;
+    int height = (int)unityImage.extent.height;
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    customWindow->vulkanReadbackSwapRedBlue =
+        unityImage.format == VK_FORMAT_B8G8R8A8_UNORM || unityImage.format == VK_FORMAT_B8G8R8A8_SRGB;
+
+    if (customWindow->qtImage == nullptr || customWindow->qtImage->width() != width || customWindow->qtImage->height() != height) {
+        customWindow->setTextureSize(width, height);
+    } else if (customWindow->vulkanReadbackSwapRedBlue && customWindow->qtImage->format() != QImage::Format_ARGB32) {
+        customWindow->setTextureSize(width, height);
+    } else if (!customWindow->vulkanReadbackSwapRedBlue && customWindow->qtImage->format() != QImage::Format_RGBA8888) {
+        customWindow->setTextureSize(width, height);
+    }
+
+    if (!ensureVulkanReadbackResources(customWindow, width, height)) {
+        return false;
+    }
+
+    VkBufferImageCopy copyRegion = {};
+    copyRegion.imageSubresource.aspectMask = unityImage.aspect != 0 ? unityImage.aspect : VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.imageSubresource.mipLevel = 0;
+    copyRegion.imageSubresource.baseArrayLayer = 0;
+    copyRegion.imageSubresource.layerCount = 1;
+    copyRegion.imageExtent.width = (uint32_t)width;
+    copyRegion.imageExtent.height = (uint32_t)height;
+    copyRegion.imageExtent.depth = 1;
+
+    s_vkCmdCopyImageToBuffer(recordingState.commandBuffer, unityImage.image, unityImage.layout,
+                             (VkBuffer)customWindow->vulkanReadbackBuffer, 1, &copyRegion);
+
+    VkBufferMemoryBarrier bufferBarrier = {};
+    bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    bufferBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarrier.buffer = (VkBuffer)customWindow->vulkanReadbackBuffer;
+    bufferBarrier.offset = 0;
+    bufferBarrier.size = customWindow->vulkanReadbackSize;
+
+    s_vkCmdPipelineBarrier(recordingState.commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
+                           0, nullptr, 1, &bufferBarrier, 0, nullptr);
+
+    customWindow->vulkanReadbackSubmittedFrame = recordingState.currentFrameNumber;
+    customWindow->vulkanReadbackPending = true;
+
+    if (s_DebugLoggingEnabled && (customWindow->debugTextureUpdateCount < 3 || customWindow->debugTextureUpdateCount % 120 == 0)) {
+        qInfo() << "[TextureDebug] submitted Vulkan readback window" << customWindow->customId << "frame"
+                << recordingState.currentFrameNumber << "size" << width << "x" << height;
+    }
+    customWindow->debugTextureUpdateCount++;
+    return true;
+}
+#endif
 
 class CustomApplication : public QApplication {
   public:
@@ -663,10 +1013,14 @@ bool CustomWindow::copyTexture() {
     uchar* startingBits = qtImage->bits();
     uchar* source = (uchar*)mapped.pData;
 
-    for (int i = 0; i < height; i++) {
-        int invertedY = (height - i - 1);
-        memcpy(startingBits + i * bytesPerLine, source + invertedY * bytesPerLine, bytesPerLine);
+    if (mapped.RowPitch == (UINT)bytesPerLine) {
+        memcpy(startingBits, source, bytesPerLine * height);
+    } else {
+        for (int i = 0; i < height; i++) {
+            memcpy(startingBits + i * bytesPerLine, source + i * mapped.RowPitch, bytesPerLine);
+        }
     }
+    this->textureDataIsUpsideDown = true;
 
     ctx->Unmap(stagingTexture, 0);
     ctx->Release();
@@ -678,19 +1032,48 @@ bool CustomWindow::copyTexture() {
 void CustomWindow::setTexture(GLuint textureId) {
     this->glTextureId = textureId;
     this->textureUsesOpenGL = true;
+    this->textureUsesVulkan = false;
     if (s_DebugLoggingEnabled) {
         qInfo() << "[TextureDebug] setTexture(OpenGL) window" << this->customId << "textureId" << textureId;
     }
 }
 
-void CustomWindow::setTextureSize(int w, int h) {
-    SAFE_DELETE(this->qtImage);
-    this->qtImage = new QImage(w, h, QImage::Format_RGBA8888_Premultiplied);
-    SAFE_FREE(this->tempTexture);
-    tempTexture = malloc(w * h * 4);
-    this->hasTexturePixels = false;
+void CustomWindow::setVulkanTexture(void* texturePtr) {
+    this->unityVulkanTexture = texturePtr;
+    this->textureUsesOpenGL = false;
+    this->textureUsesVulkan = texturePtr != nullptr;
+    if (texturePtr == nullptr) {
+        this->hasTexturePixels = false;
+        this->vulkanReadbackPending = false;
+    }
     if (s_DebugLoggingEnabled) {
-        qInfo() << "[TextureDebug] setTextureSize window" << this->customId << "size" << w << "x" << h;
+        qInfo() << "[TextureDebug] setTexture(Vulkan) window" << this->customId << "texturePtr" << texturePtr;
+    }
+}
+
+void CustomWindow::setTextureSize(int w, int h) {
+    if (w <= 0 || h <= 0) {
+        qWarning() << "[TextureDebug] setTextureSize ignored invalid size for window" << this->customId << w << h;
+        return;
+    }
+
+    QImage::Format desiredFormat =
+        this->textureUsesVulkan && this->vulkanReadbackSwapRedBlue ? QImage::Format_ARGB32 : QImage::Format_RGBA8888;
+
+    if (this->qtImage != nullptr && this->qtImage->width() == w && this->qtImage->height() == h &&
+        this->qtImage->format() == desiredFormat) {
+        return;
+    }
+
+    SAFE_DELETE(this->qtImage);
+    this->qtImage = new QImage(w, h, desiredFormat);
+    SAFE_FREE(this->tempTexture);
+    releaseVulkanReadbackResources(this);
+    this->hasTexturePixels = false;
+    this->textureDataIsUpsideDown = false;
+    if (s_DebugLoggingEnabled) {
+        qInfo() << "[TextureDebug] setTextureSize window" << this->customId << "size" << w << "x" << h << "format"
+                << desiredFormat;
     }
 }
 
@@ -708,13 +1091,31 @@ void CustomWindow::setTexturePixels(const void* pixels, int byteCount, int w, in
     }
 
     if (this->qtImage == nullptr || this->qtImage->width() != w || this->qtImage->height() != h ||
-        this->tempTexture == nullptr) {
+        this->tempTexture == nullptr && this->textureUsesOpenGL) {
         this->setTextureSize(w, h);
     }
 
-    memcpy(this->tempTexture, pixels, expectedByteCount);
+    if (this->hasTexturePixels && this->updateQueued.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    int bytesPerLine = qtImage->bytesPerLine();
+    int height = qtImage->height();
+    int sourceBytesPerLine = w * 4;
+    uchar* startingBits = qtImage->bits();
+    const uchar* source = (const uchar*)pixels;
+    if (bytesPerLine == sourceBytesPerLine) {
+        memcpy(startingBits, source, expectedByteCount);
+    } else {
+        for (int i = 0; i < height; i++) {
+            memcpy(startingBits + i * bytesPerLine, source + i * sourceBytesPerLine, sourceBytesPerLine);
+        }
+    }
+
     this->textureUsesOpenGL = false;
+    this->textureUsesVulkan = false;
     this->hasTexturePixels = true;
+    this->textureDataIsUpsideDown = true;
     this->debugLoggedMissingTexture = false;
 
     if (s_DebugLoggingEnabled && (this->debugTextureUpdateCount < 3 || this->debugTextureUpdateCount % 120 == 0)) {
@@ -722,6 +1123,8 @@ void CustomWindow::setTexturePixels(const void* pixels, int byteCount, int w, in
                 << byteCount << samplePixelSummary((const unsigned char*)pixels, w, h);
     }
     this->debugTextureUpdateCount++;
+
+    requestWindowUpdate(this);
 }
 
 bool CustomWindow::copyTexture() {
@@ -732,12 +1135,19 @@ bool CustomWindow::copyTexture() {
         qWarning() << "WARNING: Tried to copyTexture() when window is closing.";
         return false;
     }
-    if (this->tempTexture == nullptr || this->qtImage == nullptr) {
+    if (this->qtImage == nullptr) {
         qWarning() << "WARNING: Tried to copyTexture() when texture is deleted.";
         return false;
     }
 
     if (this->textureUsesOpenGL) {
+        if (this->tempTexture == nullptr) {
+            this->tempTexture = malloc(this->qtImage->width() * this->qtImage->height() * 4);
+            if (this->tempTexture == nullptr) {
+                qWarning() << "[TextureDebug] Failed to allocate OpenGL temp texture buffer for window" << this->customId;
+                return false;
+            }
+        }
         glBindTexture(GL_TEXTURE_2D, this->glTextureId);
         glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, tempTexture);
         GLenum glError = glGetError();
@@ -753,16 +1163,23 @@ bool CustomWindow::copyTexture() {
         }
         this->debugLoggedMissingTexture = true;
         return false;
+    } else {
+        return true;
     }
 
     int bytesPerLine = qtImage->bytesPerLine();
     int height = qtImage->height();
+    int sourceBytesPerLine = this->qtImage->width() * 4;
     uchar* startingBits = qtImage->bits();
     uchar* source = (uchar*)tempTexture;
-    for (int i = 0; i < height; i++) {
-        int invertedY = (height - i - 1);
-        memcpy(startingBits + i * bytesPerLine, source + invertedY * bytesPerLine, bytesPerLine);
+    if (bytesPerLine == sourceBytesPerLine) {
+        memcpy(startingBits, source, bytesPerLine * height);
+    } else {
+        for (int i = 0; i < height; i++) {
+            memcpy(startingBits + i * bytesPerLine, source + i * sourceBytesPerLine, sourceBytesPerLine);
+        }
     }
+    this->textureDataIsUpsideDown = true;
 
     if (s_DebugLoggingEnabled && (this->debugCopyCount < 3 || this->debugCopyCount % 120 == 0)) {
         qInfo() << "[TextureDebug] copyTexture(" << (this->textureUsesOpenGL ? "OpenGL" : "CPU/Vulkan") << ") window"
@@ -952,6 +1369,7 @@ void CustomWindow::updateThings() {
 }
 
 void CustomWindow::paintEvent(QPaintEvent* paintEvent) {
+    this->updateQueued.store(false, std::memory_order_release);
     QPainter painter(this);
     if (!isVisible) {
         return;
@@ -966,6 +1384,7 @@ void CustomWindow::paintEvent(QPaintEvent* paintEvent) {
     this->debugLoggedNullImage = false;
 
     qreal scaling = waylandType == WaylandType::None ? this->devicePixelRatio() : 1;
+    QRect targetRect(this->cutoffX, this->cutoffY, this->targetWidth / scaling, this->targetHeight / scaling);
 
     if (s_DebugLoggingEnabled && (this->debugPaintCount < 3 || this->debugPaintCount % 120 == 0)) {
         qInfo() << "[PaintDebug] paintEvent window" << this->customId << "target" << this->targetWidth << "x"
@@ -976,8 +1395,15 @@ void CustomWindow::paintEvent(QPaintEvent* paintEvent) {
     }
     this->debugPaintCount++;
 
-    painter.drawImage(QRect(this->cutoffX, this->cutoffY, this->targetWidth / scaling, this->targetHeight / scaling),
-                      *this->qtImage, this->qtImage->rect());
+    if (this->textureDataIsUpsideDown) {
+        painter.save();
+        painter.translate(0, (2 * targetRect.y()) + targetRect.height());
+        painter.scale(1, -1);
+        painter.drawImage(targetRect, *this->qtImage, this->qtImage->rect());
+        painter.restore();
+    } else {
+        painter.drawImage(targetRect, *this->qtImage, this->qtImage->rect());
+    }
 }
 
 void CustomWindow::setIcon(QImage* image) {
@@ -1002,6 +1428,7 @@ void CustomWindow::closeEvent(QCloseEvent* closeEvent) {
 CustomWindow::~CustomWindow() {
     SAFE_DELETE(this->qtImage);
 #ifndef WITH_WINE
+    releaseVulkanReadbackResources(this);
     SAFE_FREE(this->tempTexture);
 #endif
 
@@ -1417,7 +1844,7 @@ extern "C" char* set_window_texture(HWND window,
 #ifdef WITH_WINE
                                     HWND texturePtr
 #else
-                                    GLuint texturePtr
+                                    uintptr_t texturePtr
 #endif
 ) {
     std::cerr << "set_window_texture(" << std::hex << window << std::dec << ", " << std::hex << texturePtr << std::dec
@@ -1431,12 +1858,14 @@ extern "C" char* set_window_texture(HWND window,
     customWindow->setTexture((ID3D11Resource*)texturePtr);
 #else
     if (s_RendererType == kUnityGfxRendererOpenGLCore) {
-        customWindow->setTexture(texturePtr);
+        customWindow->setTexture((GLuint)texturePtr);
+    } else if (s_RendererType == kUnityGfxRendererVulkan) {
+        customWindow->setVulkanTexture((void*)texturePtr);
     } else {
         customWindow->textureUsesOpenGL = false;
         qInfo() << "[TextureDebug] set_window_texture called while renderer is" << rendererTypeToString(s_RendererType)
                 << "for window" << customWindow->customId << "texturePtr" << texturePtr
-                << "- waiting for CPU/Vulkan upload path.";
+                << "- renderer not ready yet.";
     }
 #endif
     return createString("");
@@ -1684,9 +2113,26 @@ extern "C" WINAPI void arrange_windows(HWND* windows, int count) {
 static void UNITY_INTERFACE_API render(int eventID) {
     // std::cerr << "render(" << eventID << ")" << std::endl;
     customWindowMutex.lock();
+#ifndef WITH_WINE
+    UnityVulkanRecordingState vulkanRecordingState = {};
+    bool hasVulkanRecordingState = false;
+    if (s_RendererType == kUnityGfxRendererVulkan && eventID == kRenderEventVulkanCopy && s_GraphicsVulkan != nullptr) {
+        hasVulkanRecordingState =
+            s_GraphicsVulkan->CommandRecordingState(&vulkanRecordingState, kUnityVulkanGraphicsQueueAccess_DontCare);
+    }
+#endif
     for (auto customWindow : allCustomWindows) {
-        if (customWindow->copyTexture()) {
-            QMetaObject::invokeMethod(customWindow, qOverload<>(&QWidget::repaint), Qt::QueuedConnection);
+        if (customWindow->textureUsesOpenGL) {
+            if (customWindow->copyTexture()) {
+                requestWindowUpdate(customWindow);
+            }
+#ifndef WITH_WINE
+        } else if (customWindow->textureUsesVulkan && hasVulkanRecordingState) {
+            if (processCompletedVulkanReadback(customWindow, vulkanRecordingState.safeFrameNumber)) {
+                requestWindowUpdate(customWindow);
+            }
+            submitVulkanReadback(customWindow, vulkanRecordingState);
+#endif
         }
     }
     customWindowMutex.unlock();
@@ -1798,12 +2244,45 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
             return;
         }
         if (s_RendererType == kUnityGfxRendererVulkan) {
-            qInfo() << "[TextureDebug] Vulkan renderer detected, using CPU upload compatibility path for custom windows.";
+            s_GraphicsVulkan = s_UnityInterfaces->Get<IUnityGraphicsVulkan>();
+            if (s_GraphicsVulkan == nullptr) {
+                blockWithError("Unity Vulkan graphics interface is unavailable.");
+                return;
+            }
+
+            loadVulkanFunctions(s_GraphicsVulkan->Instance());
+            UnityVulkanPluginEventConfig eventConfig = {};
+            eventConfig.renderPassPrecondition = kUnityVulkanRenderPass_EnsureOutside;
+            eventConfig.graphicsQueueAccess = kUnityVulkanGraphicsQueueAccess_DontCare;
+            eventConfig.flags = kUnityVulkanEventConfigFlag_EnsurePreviousFrameSubmission |
+                                kUnityVulkanEventConfigFlag_ModifiesCommandBuffersState;
+            s_GraphicsVulkan->ConfigureEvent(kRenderEventVulkanCopy, &eventConfig);
+            qInfo() << "[TextureDebug] Vulkan renderer detected, using native Vulkan readback path for custom windows.";
         }
 #endif
         break;
     }
     case kUnityGfxDeviceEventShutdown: {
+#ifndef WITH_WINE
+        customWindowMutex.lock();
+        for (auto customWindow : allCustomWindows) {
+            releaseVulkanReadbackResources(customWindow);
+        }
+        customWindowMutex.unlock();
+        s_GraphicsVulkan = NULL;
+        s_vkGetPhysicalDeviceMemoryProperties = nullptr;
+        s_vkCreateBuffer = nullptr;
+        s_vkDestroyBuffer = nullptr;
+        s_vkGetBufferMemoryRequirements = nullptr;
+        s_vkAllocateMemory = nullptr;
+        s_vkFreeMemory = nullptr;
+        s_vkBindBufferMemory = nullptr;
+        s_vkMapMemory = nullptr;
+        s_vkUnmapMemory = nullptr;
+        s_vkInvalidateMappedMemoryRanges = nullptr;
+        s_vkCmdCopyImageToBuffer = nullptr;
+        s_vkCmdPipelineBarrier = nullptr;
+#endif
         s_RendererType = kUnityGfxRendererNull;
         break;
     }

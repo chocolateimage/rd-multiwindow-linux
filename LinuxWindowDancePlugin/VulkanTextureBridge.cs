@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -12,11 +11,13 @@ public sealed class VulkanTextureBridge : MonoBehaviour
     private sealed class TrackedWindow
     {
         public CustomWindowLinux Window = null!;
-        public Texture2D? StagingTexture;
-        public int CaptureCount;
         public bool LoggedMissingSourceTexture;
         public bool LoggedMissingWindowPtr;
-        public bool LoggedFirstSuccessfulUpload;
+        public bool LoggedMissingNativeTexture;
+        public bool LoggedRegisteredTexture;
+        public int NativeTextureWidth = -1;
+        public int NativeTextureHeight = -1;
+        public IntPtr NativeTexturePtr = IntPtr.Zero;
     }
 
     private static VulkanTextureBridge? instance;
@@ -60,8 +61,8 @@ public sealed class VulkanTextureBridge : MonoBehaviour
 
         instance = this;
         DontDestroyOnLoad(gameObject);
-        Plugin.LogDebug("VulkanTextureBridge Awake -> starting capture loop.");
-        StartCoroutine(CaptureLoop());
+        Plugin.Logger.LogInfo("VulkanTextureBridge Awake -> using native Vulkan texture registration + plugin events.");
+        StartCoroutine(RenderLoop());
     }
 
     private void RegisterInternal(CustomWindowLinux window)
@@ -80,81 +81,53 @@ public sealed class VulkanTextureBridge : MonoBehaviour
         trackedWindows.Add(new TrackedWindow { Window = window });
     }
 
-    private IEnumerator CaptureLoop()
+    private IEnumerator RenderLoop()
     {
         while (true)
         {
             yield return endOfFrame;
 
+            bool issuedAnyVulkanWork = false;
+
             for (int i = trackedWindows.Count - 1; i >= 0; i--)
             {
                 try
                 {
-                    if (!CaptureWindow(trackedWindows[i]))
+                    if (!UpdateWindowRegistration(trackedWindows[i], ref issuedAnyVulkanWork))
                     {
                         trackedWindows.RemoveAt(i);
                     }
                 }
                 catch (Exception ex)
                 {
-                    Plugin.Logger.LogWarning($"Vulkan texture capture failed: {ex}");
+                    Plugin.Logger.LogWarning($"Vulkan texture bridge update failed: {ex}");
                 }
             }
-        }
-    }
 
-    private static Texture2D EnsureStagingTexture(TrackedWindow trackedWindow, int width, int height)
-    {
-        if (trackedWindow.StagingTexture != null && trackedWindow.StagingTexture.width == width && trackedWindow.StagingTexture.height == height)
-        {
-            return trackedWindow.StagingTexture;
-        }
-
-        if (trackedWindow.StagingTexture != null)
-        {
-            Destroy(trackedWindow.StagingTexture);
-        }
-
-        trackedWindow.StagingTexture = new Texture2D(width, height, TextureFormat.RGBA32, false, false)
-        {
-            filterMode = FilterMode.Point,
-            wrapMode = TextureWrapMode.Clamp,
-            name = $"VulkanWindowBridge_{width}x{height}"
-        };
-
-        Plugin.Logger.LogInfo($"Create Vulkan staging texture: {width}x{height}");
-        Native.SetWindowTextureSize(trackedWindow.Window.Window.WindowPtr, width, height);
-        return trackedWindow.StagingTexture;
-    }
-
-    private static string DescribeSample(byte[] rawData, int width, int height)
-    {
-        if (rawData.Length < 4 || width <= 0 || height <= 0)
-        {
-            return "sample=unavailable";
-        }
-
-        static string PixelAt(byte[] data, int widthValue, int heightValue, int x, int y)
-        {
-            x = Mathf.Clamp(x, 0, widthValue - 1);
-            y = Mathf.Clamp(y, 0, heightValue - 1);
-            int index = (y * widthValue + x) * 4;
-            if (index + 3 >= data.Length)
+            if (issuedAnyVulkanWork)
             {
-                return "(out-of-range)";
+                GL.IssuePluginEvent(Native.GetRenderEventFunc(), Native.RenderEventVulkanCopy);
             }
-
-            return $"({data[index + 0]},{data[index + 1]},{data[index + 2]},{data[index + 3]})";
         }
-
-        return $"tl={PixelAt(rawData, width, height, 0, 0)} center={PixelAt(rawData, width, height, width / 2, height / 2)} br={PixelAt(rawData, width, height, width - 1, height - 1)}";
     }
 
-    private static bool CaptureWindow(TrackedWindow trackedWindow)
+    private static void EnsureNativeTextureSize(TrackedWindow trackedWindow, IntPtr windowPtr, int width, int height)
+    {
+        if (trackedWindow.NativeTextureWidth == width && trackedWindow.NativeTextureHeight == height)
+        {
+            return;
+        }
+
+        Native.SetWindowTextureSize(windowPtr, width, height);
+        trackedWindow.NativeTextureWidth = width;
+        trackedWindow.NativeTextureHeight = height;
+    }
+
+    private static bool UpdateWindowRegistration(TrackedWindow trackedWindow, ref bool issuedAnyVulkanWork)
     {
         if (trackedWindow.Window == null || trackedWindow.Window.Window == null)
         {
-            Plugin.Logger.LogWarning("Vulkan capture stopped because target window reference is gone.");
+            Plugin.Logger.LogWarning("Vulkan bridge stopped because target window reference is gone.");
             return false;
         }
 
@@ -163,7 +136,7 @@ public sealed class VulkanTextureBridge : MonoBehaviour
         {
             if (!trackedWindow.LoggedMissingSourceTexture)
             {
-                Plugin.Logger.LogWarning($"Vulkan capture waiting for RenderTexture: ptr=0x{trackedWindow.Window.Window.WindowPtr.ToInt64():X}");
+                Plugin.Logger.LogWarning($"Vulkan bridge waiting for RenderTexture: ptr=0x{trackedWindow.Window.Window.WindowPtr.ToInt64():X}");
                 trackedWindow.LoggedMissingSourceTexture = true;
             }
             return true;
@@ -175,46 +148,49 @@ public sealed class VulkanTextureBridge : MonoBehaviour
         {
             if (!trackedWindow.LoggedMissingWindowPtr)
             {
-                Plugin.Logger.LogWarning("Vulkan capture waiting for native window pointer (still zero).");
+                Plugin.Logger.LogWarning("Vulkan bridge waiting for native window pointer (still zero).");
                 trackedWindow.LoggedMissingWindowPtr = true;
             }
             return true;
         }
         trackedWindow.LoggedMissingWindowPtr = false;
 
-        Texture2D stagingTexture = EnsureStagingTexture(trackedWindow, sourceTexture.width, sourceTexture.height);
-        RenderTexture previousRenderTexture = RenderTexture.active;
+        if (sourceTexture.width <= 0 || sourceTexture.height <= 0 || !sourceTexture.IsCreated())
+        {
+            return true;
+        }
 
-        if (Plugin.DebugLoggingEnabled && (trackedWindow.CaptureCount < 3 || trackedWindow.CaptureCount % 120 == 0))
+        EnsureNativeTextureSize(trackedWindow, windowPtr, sourceTexture.width, sourceTexture.height);
+
+        IntPtr nativeTexturePtr = sourceTexture.GetNativeTexturePtr();
+        if (nativeTexturePtr == IntPtr.Zero)
+        {
+            if (!trackedWindow.LoggedMissingNativeTexture)
+            {
+                Plugin.Logger.LogWarning($"Vulkan bridge waiting for native texture pointer: ptr=0x{windowPtr.ToInt64():X}");
+                trackedWindow.LoggedMissingNativeTexture = true;
+            }
+            return true;
+        }
+        trackedWindow.LoggedMissingNativeTexture = false;
+
+        if (trackedWindow.NativeTexturePtr != nativeTexturePtr)
+        {
+            Native.SetWindowTexture(windowPtr, nativeTexturePtr);
+            trackedWindow.NativeTexturePtr = nativeTexturePtr;
+
+            Plugin.Logger.LogInfo(
+                $"Registered Vulkan texture: window=0x{windowPtr.ToInt64():X}, texture=0x{nativeTexturePtr.ToInt64():X}, size={sourceTexture.width}x{sourceTexture.height}");
+            trackedWindow.LoggedRegisteredTexture = true;
+        }
+
+        if (Plugin.DebugLoggingEnabled && trackedWindow.LoggedRegisteredTexture)
         {
             Plugin.LogDebug(
-                $"CaptureWindow begin: ptr=0x{windowPtr.ToInt64():X}, rt={sourceTexture.width}x{sourceTexture.height}, created={sourceTexture.IsCreated()}, format={sourceTexture.format}, graphicsFormat={sourceTexture.graphicsFormat}");
+                $"Queued Vulkan plugin event: window=0x{windowPtr.ToInt64():X}, texture=0x{nativeTexturePtr.ToInt64():X}, size={sourceTexture.width}x{sourceTexture.height}, format={sourceTexture.graphicsFormat}");
         }
 
-        try
-        {
-            RenderTexture.active = sourceTexture;
-            stagingTexture.ReadPixels(new Rect(0, 0, sourceTexture.width, sourceTexture.height), 0, 0, false);
-            stagingTexture.Apply(false, false);
-        }
-        finally
-        {
-            RenderTexture.active = previousRenderTexture;
-        }
-
-        NativeArray<byte> rawDataView = stagingTexture.GetRawTextureData<byte>();
-        byte[] rawData = rawDataView.ToArray();
-        Native.SetWindowTexturePixels(windowPtr, rawData, rawData.Length, sourceTexture.width, sourceTexture.height);
-
-        if (!trackedWindow.LoggedFirstSuccessfulUpload ||
-            (Plugin.DebugLoggingEnabled && (trackedWindow.CaptureCount < 3 || trackedWindow.CaptureCount % 120 == 0)))
-        {
-            Plugin.Logger.LogInfo(
-                $"Vulkan upload frame {trackedWindow.CaptureCount} -> ptr=0x{windowPtr.ToInt64():X}, bytes={rawData.Length}, {DescribeSample(rawData, sourceTexture.width, sourceTexture.height)}");
-            trackedWindow.LoggedFirstSuccessfulUpload = true;
-        }
-
-        trackedWindow.CaptureCount++;
+        issuedAnyVulkanWork = true;
         return true;
     }
 }

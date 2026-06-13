@@ -12,7 +12,7 @@ Other tools: [![Logo](https://party.playlook.de/public/qrhythmcafe-icon.png) QRh
 ## Instructions
 
 > [!IMPORTANT]
-> ⚠️ Only KDE Plasma 6.5+ (KWin) and Hyprland are supported. You can try to use it on other desktop environments/window managers, but it may break.
+> ⚠️ Only KDE Plasma 6.5+ (KWin) and Hyprland (0.54 and earlier with hyprlang, 0.55+ with Lua) are supported. You can try to use it on other desktop environments/window managers, but it may break.
 
 You can either choose from these versions:
 

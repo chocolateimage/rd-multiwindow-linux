@@ -10,6 +10,7 @@ class CustomWindow : public QWidget {
     float targetOpacity;
     bool targetDecorations = true;
     QString targetTitle;
+    std::string hyprAddress; // Hyprland window address for dispatch commands
     // QLabel* testLabel;
     bool isVisible = true;
     bool isClosing = false;
@@ -72,10 +73,17 @@ class ScreenSizeWindow : public QWidget {
 class Hyprctl {
   public:
     std::string socketPath;
+    bool useNewSyntax = true; // Hyprland >= 0.55 uses Lua dispatchers
+    bool debug = false;
 
     Hyprctl();
     void sendMessage(std::string message);
     bool sendMessageSync(std::string message);
     bool setProp(std::string window, std::string effect, std::string argument);
     void moveWindow(std::string window, int x, int y);
+    void floatWindow(std::string window);
+    void resizeWindow(std::string window, int w, int h);
+    void moveAndResize(std::string window, int x, int y, int w, int h);
+    bool alterZorder(std::string mode, std::string window);
+    std::string querySync(std::string message);
 };

@@ -5,7 +5,7 @@
 Demonstration Videos:
 
 - [2-X All The Times](https://youtu.be/_Lh0sd66jjI)
-- [7-X Miracle Defibrillator](https://youtu.be/38irJ0cOILQ) (outdated video)
+- [7-X Miracle Defibrillator](https://youtu.be/JAlYj7la_B4)
 
 Other tools: [![Logo](https://party.playlook.de/public/qrhythmcafe-icon.png) QRhythmCafe - Download Rhythm Doctor levels](https://github.com/chocolateimage/qrhythmcafe)
 

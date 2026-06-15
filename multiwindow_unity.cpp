@@ -384,8 +384,16 @@ void hookIntoDLL() {
 }
 #endif
 
+QString getDesktopEnv() {
+    QString env = qgetenv("XDG_SESSION_DESKTOP").toLower();
+    if (env.isEmpty()) {
+        env = qgetenv("XDG_CURRENT_DESKTOP").toLower();
+    }
+    return env;
+}
+
 void checkForWayland() {
-    auto sessionDesktop = qgetenv("XDG_SESSION_DESKTOP").toLower();
+    auto sessionDesktop = getDesktopEnv();
     bool useX11 = false;
 
     if (qgetenv("XDG_SESSION_TYPE").toLower() != "wayland") {
@@ -417,7 +425,7 @@ void checkForWayland() {
 }
 
 bool doesDesktopNeedCutoff() {
-    QString sessionDesktop = qgetenv("XDG_SESSION_DESKTOP").toLower();
+    QString sessionDesktop = getDesktopEnv();
     if (sessionDesktop == "i3" || sessionDesktop == "hyprland") {
         return false;
     }

@@ -822,11 +822,13 @@ void CustomWindow::updateThings() {
         if (finalDecorations != _lastDecorations) {
             this->_lastDecorations = finalDecorations;
 			hyprctl->sendMessageSync((std::string) "dispatch hl.dsp.window.tag({ tag = '" +
-					(finalDecorations ? "+" : "-") + "_rd_window_dance_shown', window = 'initialtitle:" +
+					(finalDecorations ? "-" : "+") + "_rd_window_dance_frameless', window = 'initialtitle:" +
 					std::to_string(customId) + "' })");
         }
 
-        this->setWindowTitle(targetTitle);
+		// TODO: After the Lua update, Hyprland is consistently setting the
+		// wrong initial class so leave it disabled for now
+        //this->setWindowTitle(targetTitle);
     } else {
         this->setFixedSize(finalWidth, finalHeight);
         this->setGeometry(finalX, finalY, finalWidth, finalHeight);
@@ -1012,17 +1014,16 @@ bool Hyprctl::initWindowRules() {
 			no_blur = true,
 			suppress_event = "activatefocus",
 			opaque = true
-			--decorate = false
 		})
 
-		-- Showing the dancing windows when window dance is active
+		-- Hiding window decorations for dancing windows
 		hl.window_rule({
 			match = {
 				initial_class = "Rhythm Doctor",
-				tag = "_rd_window_dance_shown"
+				tag = "_rd_window_dance_frameless"
 			},
 
-			decorate = true,
+			decorate = false,
 		})
 
 		-- Hiding the main window when window dance is active

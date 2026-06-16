@@ -996,11 +996,69 @@ bool Hyprctl::initWindowRules() {
 		-- Also, avoid using named window rules since anonymous ones
 		-- always take priority, even if the named one is defined
 		-- afterwards
-		if _rd_window_rules_active then
+		if _rd then
 			return
 		end
 
-		_rd_window_rules_active = true
+		_rd = {
+			dancing_windows = {},
+			main_window = nil
+		}
+
+		-- Returns the window (or nil if not found) and a bool signifying if
+		-- it was a "dancing" window
+		local function get_window_by_id(id)
+			local rd = _rd
+
+			if id then
+				local window = rd.dancing_windows[id]
+
+				if not window then
+					window = hl.get_window("initialtitle:" .. id)
+
+					if not window then
+						return nil, false
+					end
+
+					rd.dancing_windows[id] = window
+				end
+
+				return window, true
+			else
+				local window = rd.main_window
+
+				if not window then
+					window = hl.get_window("initialtitle:Rhythm Doctor")
+
+					if not window then
+						return nil, false
+					end
+
+					rd.main_window = window
+				end
+
+				return window, false
+			end
+		end
+
+		function _rd:set_window_geometry(id, x, y, w, h)
+			local window = get_window_by_id(id)
+			if not window then return end
+
+			if not (x == window.x and y == window.y) then
+				hl.dispatch(hl.dsp.window.move({ x = x, y = y, window = window }))
+			end
+
+			if not (w == window.width and h == window.width) then
+				hl.dispatch(hl.dsp.window.resize({ x = w, y = h, window = window }))
+			end
+		end
+
+		if _rd.window_rules_active then
+			return
+		end
+
+		_rd.window_rules_active = true
 
 		hl.window_rule({
 			match = {
@@ -1045,19 +1103,12 @@ bool Hyprctl::initWindowRules() {
 // to Hyprland IPC
 void Hyprctl::setWindowGeometry(int id, int x, int y, int w, int h) {
     return sendMessage(("eval " +
-		(std::string) "local window, new_x, new_y, new_w, new_h = hl.get_window('initialtitle:" +
+		(std::string) "_rd:set_window_geometry(" +
 		// A negative id means the main window
 		// I hope sentinal values aren't bad practice in C++...
-		(id < 0 ? (std::string) "Rhythm Doctor" : std::to_string(id)) + "'), " +
-		std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(w) + ", " + std::to_string(h) + "\n"
-		R"""(
-		if not window then
-			return
-		end
-
-		hl.dispatch(hl.dsp.window.move({ x = new_x, y = new_y, window = window }))
-		hl.dispatch(hl.dsp.window.resize({ x = new_w, y = new_h, window = window }))
-		)"""
+		(id < 0 ? (std::string) "nil" : std::to_string(id)) + ", " +
+		std::to_string(x) + ", " + std::to_string(y) + ", " +
+		std::to_string(w) + ", " + std::to_string(h) + ")"
 	));
 }
 
@@ -1465,6 +1516,9 @@ extern "C" WINAPI void destroy_window(HWND window) {
     customWindowMutex.lock();
     CustomWindow* customWindow = (CustomWindow*)window;
     customWindow->isClosing = true;
+	if (waylandType == WaylandType::Hyprland) {
+		hyprctl->sendMessage("eval _rd.dancing_windows[" + std::to_string(customWindow->customId) + "] = nil");
+	}
     QMetaObject::invokeMethod(
         app,
         [customWindow]() {

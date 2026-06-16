@@ -449,6 +449,7 @@ void createApplication() {
         qputenv("QT_QPA_PLATFORM", "xcb");
     } else if (waylandType == WaylandType::Hyprland) {
         hyprctl = new Hyprctl();
+		hyprctl->initWindowRules();
     }
 
     std::thread([] {
@@ -816,22 +817,15 @@ void CustomWindow::updateThings() {
         }
         this->setWindowTitle(targetTitle + QString::fromStdString(encoded));
     } else if (waylandType == WaylandType::Hyprland) {
-        if (!hyprReady) {
-            if (!hyprctl->setProp("initialtitle:" + std::to_string(customId), "no_blur", "on")) {
-                return;
-            }
-            hyprReady = true;
-            hyprctl->setProp("initialtitle:" + std::to_string(customId), "no_focus", "on");
-            hyprctl->setProp("initialtitle:" + std::to_string(customId), "no_anim", "on");
-            hyprctl->sendMessage("dispatch hl.dsp.window.float({ window = 'initialtitle:" + std::to_string(customId) + "' })");
-        }
-        hyprctl->moveWindow("initialtitle:" + std::to_string(customId), finalX, finalY);
-        hyprctl->sendMessage("dispatch hl.dsp.window.resize({ x = " + std::to_string(finalWidth) + ", y = " +
-                             std::to_string(finalHeight) + ", window = 'initialtitle:" + std::to_string(customId) + "'})");
+		hyprctl->setWindowGeometry(customId, finalX, finalY, finalWidth, finalHeight);
+
         if (finalDecorations != _lastDecorations) {
             this->_lastDecorations = finalDecorations;
-            hyprctl->setProp("initialtitle:" + std::to_string(customId), "decorate", finalDecorations ? "on" : "off");
+			hyprctl->sendMessageSync((std::string) "dispatch hl.dsp.window.tag({ tag = '" +
+					(finalDecorations ? "+" : "-") + "_rd_window_dance_shown', window = 'initialtitle:" +
+					std::to_string(customId) + "' })");
         }
+
         this->setWindowTitle(targetTitle);
     } else {
         this->setFixedSize(finalWidth, finalHeight);
@@ -989,12 +983,81 @@ bool Hyprctl::sendMessageSync(std::string message) {
     return true;
 }
 
-bool Hyprctl::setProp(std::string window, std::string effect, std::string argument) {
-    return sendMessageSync("dispatch hl.dsp.window.set_prop({ prop = '" + effect + "', value = '" + argument + "', window = '" + window + "'})");
+// I LOVE LUA!1!!!1 YIPPIE
+bool Hyprctl::initWindowRules() {
+	return hyprctl->sendMessageSync(R"""(eval -- Do not remove the leading
+									   -- space after 'eval'
+
+		-- Should be more efficient to use window rules instead of
+		-- repeatedly spamming Hyprland IPC
+		--
+		-- Also, avoid using named window rules since anonymous ones
+		-- always take priority, even if the named one is defined
+		-- afterwards
+		if _rd_window_rules_active then
+			return
+		end
+
+		_rd_window_rules_active = true
+
+		hl.window_rule({
+			match = {
+				initial_class = "Rhythm Doctor",
+				initial_title = "negative:Rhythm Doctor"
+			},
+
+			float = true,
+			no_focus = true,
+			no_anim = true,
+			no_blur = true,
+			suppress_event = "activatefocus",
+			opaque = true
+			--decorate = false
+		})
+
+		-- Showing the dancing windows when window dance is active
+		hl.window_rule({
+			match = {
+				initial_class = "Rhythm Doctor",
+				tag = "_rd_window_dance_shown"
+			},
+
+			decorate = true,
+		})
+
+		-- Hiding the main window when window dance is active
+		hl.window_rule({
+			match = {
+				initial_class = "Rhythm Doctor",
+				tag = "_rd_window_main_hidden"
+			},
+
+			opacity = 0.0,
+			no_blur = true
+		})
+
+		--hl.notification.create({ text = "rules ready", timeout = 3000, icon = 1 })
+	)""");
 }
 
-void Hyprctl::moveWindow(std::string window, int x, int y) {
-    return sendMessage("dispatch hl.dsp.window.move({ x = " + std::to_string(x) + ", y = " + std::to_string(y) + ", window = '" + window + "'})");
+// Merged window moving and resizing into one function to reduce calls
+// to Hyprland IPC
+void Hyprctl::setWindowGeometry(int id, int x, int y, int w, int h) {
+    return sendMessage(("eval " +
+		(std::string) "local window, new_x, new_y, new_w, new_h = hl.get_window('initialtitle:" +
+		// A negative id means the main window
+		// I hope sentinal values aren't bad practice in C++...
+		(id < 0 ? (std::string) "Rhythm Doctor" : std::to_string(id)) + "'), " +
+		std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(w) + ", " + std::to_string(h) + "\n"
+		R"""(
+		if not window then
+			return
+		end
+
+		hl.dispatch(hl.dsp.window.move({ x = new_x, y = new_y, window = window }))
+		hl.dispatch(hl.dsp.window.resize({ x = new_w, y = new_h, window = window }))
+		)"""
+	));
 }
 
 // ---- End of Hyprctl ----
@@ -1034,11 +1097,10 @@ void setMainWindowGeometry(int x, int y, int w, int h) {
 #else
     if (waylandType == WaylandType::Hyprland) {
         if (invisible) {
-            hyprctl->setProp("initialtitle:Rhythm.Doctor", "opacity", "0");
-            hyprctl->setProp("initialtitle:Rhythm.Doctor", "no_blur", "1");
+			hyprctl->sendMessageSync("dispatch hl.dsp.window.tag({ tag = '+_rd_window_main_hidden', window = 'initialtitle:Rhythm Doctor' })");
         } else {
-            hyprctl->setProp("initialtitle:Rhythm.Doctor", "opacity", "1");
-            hyprctl->moveWindow("initialtitle:Rhythm.Doctor", x, y);
+			hyprctl->sendMessageSync("dispatch hl.dsp.window.tag({ tag = '-_rd_window_main_hidden', window = 'initialtitle:Rhythm Doctor' })");
+            hyprctl->setWindowGeometry(-1, x, y, main_window_width, main_window_height);
         }
     } else {
         if (main_window_handle == 0) {
@@ -1529,7 +1591,7 @@ void arrangeWindowsHyprland(HWND* windows, int count) {
 
     if (hasChanged) {
         for (auto win : windowList) {
-            hyprctl->sendMessageSync("dispatch hl.dsp.window.alter_zorder({ mode = 'top', window = 'initialtitle:" + std::to_string(win->customId) + "'");
+            hyprctl->sendMessageSync("dispatch hl.dsp.window.alter_zorder({ mode = 'top', window = 'initialtitle:" + std::to_string(win->customId) + "' })");
         }
     }
 }

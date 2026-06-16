@@ -76,6 +76,6 @@ class Hyprctl {
     Hyprctl();
     void sendMessage(std::string message);
     bool sendMessageSync(std::string message);
-    bool setProp(std::string window, std::string effect, std::string argument);
-    void moveWindow(std::string window, int x, int y);
+	bool initWindowRules();
+    void setWindowGeometry(int id, int x, int y, int w, int h);
 };

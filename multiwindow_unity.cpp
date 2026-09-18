@@ -1423,6 +1423,7 @@ extern "C" WINAPI void present_window(HWND window) {
 extern "C" WINAPI const char* show_window(HWND window) {
     std::cerr << "show_window(" << std::hex << window << std::dec << ")" << std::endl;
     if (window == MAIN_WINDOW) {
+        setMainWindowGeometry(0, 0, MAIN_WINDOW_GEOMETRY_SKIP, MAIN_WINDOW_GEOMETRY_SKIP);
         return createString("");
     }
     CustomWindow* customWindow = (CustomWindow*)window;
